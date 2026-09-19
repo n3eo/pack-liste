@@ -31,6 +31,8 @@ pub enum Screen {
     Main,
     Help,
     Config,
+    /// Raw editor for the config file
+    ConfigEditor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -264,28 +266,27 @@ mod tests {
 
     #[test]
     fn trip_paths_resolve_relative_absolute_and_tilde() {
-        let trips_dir = Path::new("/home/user/.config/pack-liste/trips");
-
-        // Bare and relative names resolve into the trips directory
+        // Relative names resolve against the current working directory
+        let cwd = std::env::current_dir().unwrap();
         assert_eq!(
-            resolve_trip_path("my-trip.yaml", trips_dir),
-            Path::new("/home/user/.config/pack-liste/trips/my-trip.yaml")
+            resolve_trip_path("my-trip.yaml"),
+            cwd.join("my-trip.yaml")
         );
         assert_eq!(
-            resolve_trip_path("sub/my-trip.yaml", trips_dir),
-            Path::new("/home/user/.config/pack-liste/trips/sub/my-trip.yaml")
+            resolve_trip_path("sub/my-trip.yaml"),
+            cwd.join("sub/my-trip.yaml")
         );
 
         // Absolute paths are kept as-is
         assert_eq!(
-            resolve_trip_path("/tmp/my-trip.yaml", trips_dir),
+            resolve_trip_path("/tmp/my-trip.yaml"),
             Path::new("/tmp/my-trip.yaml")
         );
 
         // ~ expands to the home directory
         let home = dirs::home_dir().unwrap();
-        assert_eq!(resolve_trip_path("~/my-trip.yaml", trips_dir), home.join("my-trip.yaml"));
-        assert_eq!(resolve_trip_path("~", trips_dir), home);
+        assert_eq!(resolve_trip_path("~/my-trip.yaml"), home.join("my-trip.yaml"));
+        assert_eq!(resolve_trip_path("~"), home);
     }
 }
 
@@ -313,12 +314,26 @@ struct AppDrawState {
     trip_file_input: String,
     /// Whether the trip file name is being edited
     editing_trip_file: bool,
+    /// Whether the user is being asked to resume the previous trip file
+    resume_prompt: bool,
+    /// Trip file remembered from the previous session, offered for resume
+    remembered_trip_file: Option<PathBuf>,
     /// Config screen state
     config_section: ConfigSection,
     config_cursor: usize,
     config_scroll: usize,
     /// Editor for adding/editing a modifier on the config screen
     modifier_editor: Option<ModifierEditor>,
+    /// Screen to return to when leaving Config/ConfigEditor/Help
+    previous_screen: Screen,
+    /// Raw text of the config file being edited in the ConfigEditor screen
+    config_editor_text: Vec<String>,
+    /// Cursor (line, column) of the raw config editor
+    config_editor_cursor: (usize, usize),
+    /// Scroll offset of the raw config editor
+    config_editor_scroll: usize,
+    /// Error message shown in the raw config editor after a failed save
+    config_editor_error: Option<String>,
 }
 
 /// Sections of the config screen
@@ -432,8 +447,6 @@ pub struct App {
     draw_state: AppDrawState,
     quantity_calculation: QuantityCalculation,
     config_path: PathBuf,
-    /// Directory trip files are persisted to
-    trips_dir: PathBuf,
 }
 
 impl App {
@@ -455,7 +468,6 @@ impl App {
             .join("pack-liste");
 
         let config_file = config_path.join("config.yaml");
-        let trips_dir = config_path.join("trips");
 
         // Load or create default config
         let (mut packing_list, trip_params) = if config_file.exists() {
@@ -464,12 +476,14 @@ impl App {
             create_default_config(&config_file)?
         };
 
-        // Resolve the trip file: CLI arg wins, else the path saved in the config
-        let trip_file_path = trip_file_arg
-            .or_else(|| trip_params.last_trip_file.clone())
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| resolve_trip_path(&s, &trips_dir))
-            .unwrap_or_default();
+        // A trip file passed on the command line is loaded directly; the
+        // remembered path only prompts the user to resume on the welcome screen
+        let cli_trip = trip_file_arg.filter(|s| !s.trim().is_empty());
+        let remembered_trip = trip_params.last_trip_file.clone().filter(|s| !s.trim().is_empty());
+
+        let mut trip_file_path = cli_trip.as_deref().map(resolve_trip_path).unwrap_or_default();
+        let mut resume_prompt = false;
+        let mut remembered_trip_file: Option<PathBuf> = None;
 
         // Trip parameters, possibly overridden by a loaded trip file
         let mut weekdays = trip_params.weekdays;
@@ -492,8 +506,10 @@ impl App {
                 weather = trip.weather;
                 selected_activities = trip.selected_activities;
 
-                // Restore selection and packed state
+                // Reset the default selection, then restore from the file
                 for item in &mut packing_list.items {
+                    item.editable = false;
+                    item.packed = false;
                     if let Some(t) = trip.items.iter()
                         .find(|t| t.name.eq_ignore_ascii_case(&item.name))
                     {
@@ -501,7 +517,21 @@ impl App {
                         item.packed = t.packed;
                     }
                 }
+            } else {
+                // A new trip file starts with every item selected
+                select_all_items(&mut packing_list);
             }
+        } else {
+            // Offer to resume the remembered trip file on the welcome screen
+            if let Some(remembered) = remembered_trip {
+                let path = resolve_trip_path(&remembered);
+                if path.exists() {
+                    remembered_trip_file = Some(path);
+                    resume_prompt = true;
+                }
+            }
+            // A fresh list starts with every item selected
+            select_all_items(&mut packing_list);
         }
 
         let draw_state = AppDrawState {
@@ -523,10 +553,17 @@ impl App {
             trip_file_path,
             trip_file_input: String::new(),
             editing_trip_file: false,
+            resume_prompt,
+            remembered_trip_file,
             config_section: ConfigSection::TravelStyles,
             config_cursor: 0,
             config_scroll: 0,
             modifier_editor: None,
+            previous_screen: Screen::Welcome,
+            config_editor_text: Vec::new(),
+            config_editor_cursor: (0, 0),
+            config_editor_scroll: 0,
+            config_editor_error: None,
         };
 
         let mut app = Self {
@@ -535,7 +572,6 @@ impl App {
             draw_state,
             quantity_calculation: QuantityCalculation::new(),
             config_path: config_file,
-            trips_dir,
         };
 
         // Initialize quantities
@@ -564,7 +600,9 @@ impl App {
             selected_activities: self.draw_state.selected_activities.clone(),
             modifiers: self.draw_state.modifiers.clone(),
             last_trip_file: if self.draw_state.trip_file_path.as_os_str().is_empty() {
-                None
+                // No new path chosen: keep remembering the previous trip file
+                self.draw_state.remembered_trip_file.as_ref()
+                    .map(|p| p.display().to_string())
             } else {
                 Some(self.draw_state.trip_file_path.display().to_string())
             },
@@ -622,17 +660,14 @@ impl App {
     /// Set the trip file path from user input and load that trip file if it
     /// exists, restoring its trip parameters and packed state.
     fn apply_trip_file_path(&mut self, input: &str) -> Result<()> {
-        let path = resolve_trip_path(input, &self.trips_dir);
+        let path = resolve_trip_path(input);
         self.draw_state.trip_file_path = path.clone();
         self.draw_state.editing_trip_file = false;
 
         // Load the trip file if it exists; a missing file means a new trip
         let Some(mut trip) = TripFile::load(&path)? else {
-            // A fresh path starts from a clean selection state
-            for item in &mut self.draw_state.packing_list.items {
-                item.editable = false;
-                item.packed = false;
-            }
+            // A new trip starts with every item selected
+            select_all_items(&mut self.draw_state.packing_list);
             return self.update_quantities();
         };
 
@@ -770,13 +805,14 @@ impl App {
                     }
                 }
                 AppState::Exit => {
-                    // Save config and trip file before exiting
-                    self.save_config()?;
-                    self.save_trip_file()?;
                     break;
                 }
             }
         }
+
+        // Save config and trip file on every exit path (q, Esc, Ctrl+C)
+        self.save_config()?;
+        self.save_trip_file()?;
 
         Ok(())
     }
@@ -813,12 +849,16 @@ impl App {
                 Screen::Config => {
                     draw_config_screen(f, size, &state);
                 }
+                Screen::ConfigEditor => {
+                    draw_config_editor_screen(f, size, &mut state);
+                }
             }
         })?;
 
         // Persist the scroll offsets computed during rendering
         self.draw_state.left_scroll = state.left_scroll;
         self.draw_state.right_scroll = state.right_scroll;
+        self.draw_state.config_editor_scroll = state.config_editor_scroll;
         Ok(())
     }
 
@@ -830,6 +870,35 @@ impl App {
                     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
                         self.state = AppState::Exit;
                         return Ok(true);
+                    }
+
+                    // Ctrl+E opens the raw config file editor from any screen
+                    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('e') {
+                        self.open_config_editor()?;
+                        return Ok(false);
+                    }
+
+                    // Resume prompt: Y/Enter loads the previous trip file,
+                    // N/Esc declines and starts a fresh list
+                    if self.draw_state.resume_prompt {
+                        match key.code {
+                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                                self.draw_state.resume_prompt = false;
+                                if let Some(path) = self.draw_state.remembered_trip_file.clone() {
+                                    let input = path.display().to_string();
+                                    self.apply_trip_file_path(&input)?;
+                                }
+                            }
+                            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                                self.draw_state.resume_prompt = false;
+                                // Fresh list: keep everything selected; the
+                                // remembered path stays saved for the next run
+                                select_all_items(&mut self.draw_state.packing_list);
+                                self.update_quantities()?;
+                            }
+                            _ => {}
+                        }
+                        return Ok(false);
                     }
 
                     // Check for Ctrl+Space first
@@ -905,6 +974,11 @@ impl App {
                         return self.handle_config_screen_input(key);
                     }
 
+                    // The raw config editor handles all its own keys
+                    if self.draw_state.screen == Screen::ConfigEditor {
+                        return self.handle_config_editor_input(key);
+                    }
+
                     // Trip file path editing on the welcome screen
                     if self.draw_state.screen == Screen::Welcome && self.draw_state.editing_trip_file {
                         match key.code {
@@ -937,15 +1011,19 @@ impl App {
                                     return Ok(true);
                                 }
                                 Screen::Help => {
-                                    self.draw_state.screen = Screen::Main;
+                                    self.draw_state.screen = self.draw_state.previous_screen;
                                 }
                                 Screen::Config => {
                                     // Cancel the modifier editor, else leave the config screen
                                     if self.draw_state.modifier_editor.is_some() {
                                         self.draw_state.modifier_editor = None;
                                     } else {
-                                        self.draw_state.screen = Screen::Welcome;
+                                        self.draw_state.screen = self.draw_state.previous_screen;
                                     }
+                                }
+                                Screen::ConfigEditor => {
+                                    // Discard edits and return
+                                    self.draw_state.screen = self.draw_state.previous_screen;
                                 }
                                 Screen::Main => {
                                     match self.draw_state.input_mode {
@@ -966,7 +1044,10 @@ impl App {
                             return Ok(true);
                         }
                         KeyCode::Char('?') => {
-                            if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
+                            if matches!(self.draw_state.screen, Screen::Main | Screen::Welcome)
+                                && matches!(self.draw_state.input_mode, InputMode::Normal)
+                            {
+                                self.draw_state.previous_screen = self.draw_state.screen;
                                 self.draw_state.screen = Screen::Help;
                             }
                         }
@@ -988,9 +1069,10 @@ impl App {
                                     }
                                 }
                                 Screen::Help => {
-                                    self.draw_state.screen = Screen::Main;
+                                    self.draw_state.screen = self.draw_state.previous_screen;
                                 }
                                 Screen::Config => {}
+                                Screen::ConfigEditor => {}
                                 Screen::Main => {
                                     match &self.draw_state.input_mode {
                                         InputMode::Normal => {
@@ -1179,8 +1261,9 @@ impl App {
                             }
                         }
                         KeyCode::Char('o') | KeyCode::Char('O') => {
-                            if self.draw_state.screen == Screen::Welcome {
-                                // Open the config screen
+                            // Open the config screen from any screen
+                            if !matches!(self.draw_state.screen, Screen::Config | Screen::ConfigEditor) {
+                                self.draw_state.previous_screen = self.draw_state.screen;
                                 self.draw_state.screen = Screen::Config;
                             }
                         }
@@ -1221,7 +1304,7 @@ impl App {
                 // Up/Down navigate between fields; Left/Right adjust values
                 self.draw_state.focus = self.draw_state.focus.prev();
             }
-            Screen::Config => {}
+            Screen::Config | Screen::ConfigEditor => {}
             Screen::Main => {
                 if matches!(self.draw_state.input_mode, InputMode::Normal) {
                     // Navigate up through the visible rows of the focused side
@@ -1257,7 +1340,7 @@ impl App {
                 // Up/Down navigate between fields; Left/Right adjust values
                 self.draw_state.focus = self.draw_state.focus.next();
             }
-            Screen::Config => {}
+            Screen::Config | Screen::ConfigEditor => {}
             Screen::Main => {
                 if matches!(self.draw_state.input_mode, InputMode::Normal) {
                     // Navigate down through the visible rows of the focused side
@@ -1303,6 +1386,158 @@ impl App {
             ConfigSection::Weather => &mut self.draw_state.modifiers.weather,
             ConfigSection::Activities => &mut self.draw_state.modifiers.activities,
         }
+    }
+
+    /// Open the raw config file editor, loading the current file content
+    fn open_config_editor(&mut self) -> Result<()> {
+        if self.draw_state.screen == Screen::ConfigEditor {
+            return Ok(());
+        }
+        let text = fs::read_to_string(&self.config_path)
+            .context("Failed to read config file")?;
+        self.draw_state.config_editor_text = text.lines().map(|l| l.to_string()).collect();
+        if self.draw_state.config_editor_text.is_empty() {
+            self.draw_state.config_editor_text.push(String::new());
+        }
+        self.draw_state.config_editor_cursor = (0, 0);
+        self.draw_state.config_editor_scroll = 0;
+        self.draw_state.config_editor_error = None;
+        self.draw_state.previous_screen = self.draw_state.screen;
+        self.draw_state.screen = Screen::ConfigEditor;
+        Ok(())
+    }
+
+    /// Key handling of the raw config editor screen
+    fn handle_config_editor_input(&mut self, key: event::KeyEvent) -> Result<bool> {
+        let (line, col) = self.draw_state.config_editor_cursor;
+
+        match key.code {
+            KeyCode::Esc => {
+                // Discard edits and return
+                self.draw_state.screen = self.draw_state.previous_screen;
+            }
+            KeyCode::Enter => {
+                // Split the current line at the cursor and insert a new line
+                let lines = &mut self.draw_state.config_editor_text;
+                if line < lines.len() {
+                    let (head, tail) = lines[line].split_at(col.min(lines[line].len()));
+                    let head = head.to_string();
+                    let tail = tail.to_string();
+                    lines[line] = head;
+                    lines.insert(line + 1, tail);
+                    self.draw_state.config_editor_cursor = (line + 1, 0);
+                }
+            }
+            KeyCode::Backspace => {
+                let lines = &mut self.draw_state.config_editor_text;
+                if col > 0 {
+                    lines[line].remove(col - 1);
+                    self.draw_state.config_editor_cursor = (line, col - 1);
+                } else if line > 0 {
+                    // Join with the previous line
+                    let current = lines.remove(line);
+                    let prev_len = lines[line - 1].len();
+                    lines[line - 1].push_str(&current);
+                    self.draw_state.config_editor_cursor = (line - 1, prev_len);
+                }
+            }
+            KeyCode::Up => {
+                if line > 0 {
+                    let col = col.min(self.draw_state.config_editor_text[line - 1].len());
+                    self.draw_state.config_editor_cursor = (line - 1, col);
+                }
+            }
+            KeyCode::Down => {
+                if line + 1 < self.draw_state.config_editor_text.len() {
+                    let col = col.min(self.draw_state.config_editor_text[line + 1].len());
+                    self.draw_state.config_editor_cursor = (line + 1, col);
+                }
+            }
+            KeyCode::Left => {
+                if col > 0 {
+                    self.draw_state.config_editor_cursor = (line, col - 1);
+                } else if line > 0 {
+                    let prev_len = self.draw_state.config_editor_text[line - 1].len();
+                    self.draw_state.config_editor_cursor = (line - 1, prev_len);
+                }
+            }
+            KeyCode::Right => {
+                if col < self.draw_state.config_editor_text[line].len() {
+                    self.draw_state.config_editor_cursor = (line, col + 1);
+                } else if line + 1 < self.draw_state.config_editor_text.len() {
+                    self.draw_state.config_editor_cursor = (line + 1, 0);
+                }
+            }
+            KeyCode::Home => {
+                self.draw_state.config_editor_cursor = (line, 0);
+            }
+            KeyCode::End => {
+                let len = self.draw_state.config_editor_text[line].len();
+                self.draw_state.config_editor_cursor = (line, len);
+            }
+            KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                // Ctrl+S saves and applies the edited config
+                self.save_config_editor()?;
+            }
+            KeyCode::Char(c) => {
+                let lines = &mut self.draw_state.config_editor_text;
+                let col = col.min(lines[line].len());
+                lines[line].insert(col, c);
+                self.draw_state.config_editor_cursor = (line, col + 1);
+            }
+            _ => {}
+        }
+
+        Ok(false)
+    }
+
+    /// Save the edited config text, reload it into the app state, and return
+    /// to the previous screen. On a parse error the editor stays open and
+    /// shows the error.
+    fn save_config_editor(&mut self) -> Result<()> {
+        let text = self.draw_state.config_editor_text.join("\n");
+
+        // Validate by parsing before writing anything to disk
+        if let Err(e) = serde_yaml::from_str::<AppConfig>(&text) {
+            self.draw_state.config_editor_error = Some(format!("YAML error: {}", e));
+            return Ok(());
+        }
+
+        if let Err(e) = fs::write(&self.config_path, &text) {
+            self.draw_state.config_editor_error = Some(format!("Write error: {}", e));
+            return Ok(());
+        }
+
+        // Snapshot the trip state (selection/packed) so reloading the input
+        // config does not reset the current trip
+        let trip_state: Vec<(String, bool, bool)> = self.draw_state.packing_list.items.iter()
+            .map(|item| (item.name.clone(), item.editable, item.packed))
+            .collect();
+
+        // Reload the saved config into the app state
+        let (packing_list, trip_params) = load_config(&self.config_path)?;
+        self.draw_state.packing_list = packing_list;
+        self.draw_state.weekdays = trip_params.weekdays;
+        self.draw_state.travel_style = trip_params.travel_style;
+        self.draw_state.weather = trip_params.weather;
+        self.draw_state.selected_activities = trip_params.selected_activities;
+        self.draw_state.modifiers = trip_params.modifiers;
+
+        // Restore the trip state for items that still exist (by name)
+        for item in &mut self.draw_state.packing_list.items {
+            if let Some((_, editable, packed)) = trip_state.iter()
+                .find(|(name, _, _)| name.eq_ignore_ascii_case(&item.name))
+            {
+                item.editable = *editable;
+                item.packed = *packed;
+            }
+        }
+
+        self.reconcile_selections();
+        self.update_quantities()?;
+        self.draw_state.config_editor_error = None;
+        self.draw_state.screen = self.draw_state.previous_screen;
+        Ok(())
     }
 
     fn handle_config_screen_input(&mut self, key: event::KeyEvent) -> Result<bool> {
@@ -1825,11 +2060,20 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
+/// Select every item of a fresh or empty packing list so a new trip starts
+/// fully pre-selected
+fn select_all_items(packing_list: &mut PackingList) {
+    for item in &mut packing_list.items {
+        item.editable = true;
+        item.packed = false;
+    }
+}
+
 /// Resolve a user-entered trip file path:
 /// - `~` and `~/...` expand to the home directory
-/// - relative paths resolve against the trips directory
+/// - relative paths resolve against the current working directory
 /// - absolute paths are kept as-is
-fn resolve_trip_path(input: &str, trips_dir: &Path) -> PathBuf {
+fn resolve_trip_path(input: &str) -> PathBuf {
     let trimmed = input.trim();
     if let Some(rest) = trimmed.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
@@ -1844,7 +2088,7 @@ fn resolve_trip_path(input: &str, trips_dir: &Path) -> PathBuf {
     if path.is_absolute() {
         path.to_path_buf()
     } else {
-        trips_dir.join(path)
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(path)
     }
 }
 
@@ -1913,7 +2157,7 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
         };
         vec![
             Line::from(vec![Span::raw(" "), shown]),
-            Line::from(" Enter to edit (bare names save under ~/.config/pack-liste/trips/)".dim()),
+            Line::from(" Enter to edit (relative paths resolve against the current folder)".dim()),
         ]
     };
     let file_para = Paragraph::new(file_text);
@@ -2032,8 +2276,10 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
             Span::raw(" to change values"),
         ]),
         Line::from(vec![
-            Span::raw("Enter").bold().fg(Color::Yellow),
-            Span::raw(" to continue to packing list"),
+            Span::raw("O").bold().fg(Color::Yellow),
+            Span::raw(" config | "),
+            Span::raw("Ctrl+E").bold().fg(Color::Yellow),
+            Span::raw(" edit config file"),
         ]),
         Line::from(vec![
             Span::raw("q").bold().fg(Color::Red),
@@ -2042,6 +2288,52 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
     ])
     .wrap(Wrap { trim: true });
     f.render_widget(instructions, instructions_area);
+
+    // Resume prompt for the remembered trip file
+    if state.resume_prompt {
+        let popup_width = 60.min(size.width.saturating_sub(4));
+        let popup_height = 6.min(size.height);
+        let popup_area = Rect {
+            x: size.x + (size.width.saturating_sub(popup_width)) / 2,
+            y: size.y + (size.height.saturating_sub(popup_height)) / 2,
+            width: popup_width,
+            height: popup_height,
+        };
+
+        let block = Block::default()
+            .title("Resume Previous Trip?")
+            .borders(Borders::ALL)
+            .style(Style::new().bg(Color::Black).fg(Color::White));
+        f.render_widget(block, popup_area);
+
+        let inner = Rect {
+            x: popup_area.x + 1,
+            y: popup_area.y + 1,
+            width: popup_area.width.saturating_sub(2),
+            height: popup_area.height.saturating_sub(2),
+        };
+
+        let lines = vec![
+            Line::from(vec![
+                Span::raw("Load "),
+                Span::raw(
+                    state.remembered_trip_file
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default(),
+                ).fg(Color::Cyan).bold(),
+                Span::raw("?"),
+            ]),
+            Line::from(""),
+            Line::from(vec![
+                Span::raw("Y/Enter").bold().fg(Color::Yellow),
+                Span::raw(" resume | "),
+                Span::raw("N/Esc").bold().fg(Color::Red),
+                Span::raw(" start fresh"),
+            ]),
+        ];
+        f.render_widget(Paragraph::new(lines), inner);
+    }
 }
 
 fn draw_main_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &mut AppDrawState) {
@@ -2108,6 +2400,10 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
             Span::raw(" - Open configuration (modifiers)"),
         ]),
         Line::from(vec![
+            Span::raw("Ctrl+E").bold().fg(Color::Yellow),
+            Span::raw(" - Edit the raw config file (from any screen)"),
+        ]),
+        Line::from(vec![
             Span::raw("Tab").bold().fg(Color::Yellow),
             Span::raw(" - Navigate between fields"),
         ]),
@@ -2127,6 +2423,29 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
         Line::from(vec![
             Span::raw("A/E/D").bold().fg(Color::Yellow),
             Span::raw(" - Add / Edit / Delete modifier"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("CONFIG FILE EDITOR (Ctrl+E):").bold().fg(Color::Yellow),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("↑/↓/←/→").bold().fg(Color::Yellow),
+            Span::raw(" - Move cursor"),
+        ]),
+        Line::from(vec![
+            Span::raw("Enter").bold().fg(Color::Yellow),
+            Span::raw(" - New line | "),
+            Span::raw("Backspace").bold().fg(Color::Yellow),
+            Span::raw(" - Delete"),
+        ]),
+        Line::from(vec![
+            Span::raw("Ctrl+S").bold().fg(Color::Yellow),
+            Span::raw(" - Save & apply (validates YAML first)"),
+        ]),
+        Line::from(vec![
+            Span::raw("Esc").bold().fg(Color::Red),
+            Span::raw(" - Cancel and return"),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -2380,12 +2699,113 @@ fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDr
             Span::raw(" Edit | "),
             Span::raw("D").bold().fg(Color::Yellow),
             Span::raw(" Delete | "),
+            Span::raw("Ctrl+E").bold().fg(Color::Yellow),
+            Span::raw(" Raw editor | "),
             Span::raw("Esc").bold().fg(Color::Red),
             Span::raw(" Back"),
         ]),
     ])
     .wrap(Wrap { trim: true });
     f.render_widget(instructions, instructions_area);
+}
+
+fn draw_config_editor_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &mut AppDrawState) {
+    let [title_area, editor_area, footer_area] = *Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(5),
+            Constraint::Length(2),
+        ])
+        .split(size) else {
+        return;
+    };
+
+    let title = Paragraph::new(format!("Edit Config - {}", "config.yaml"))
+        .style(Style::new().bold().fg(Color::Green));
+    f.render_widget(title, title_area);
+
+    let block = Block::default()
+        .title("config.yaml (YAML)")
+        .borders(Borders::ALL);
+    f.render_widget(block, editor_area);
+
+    let inner = Rect {
+        x: editor_area.x + 1,
+        y: editor_area.y + 1,
+        width: editor_area.width.saturating_sub(2),
+        height: editor_area.height.saturating_sub(2),
+    };
+
+    let (cursor_line, cursor_col) = state.config_editor_cursor;
+    let viewport_height = inner.height as usize;
+
+    // Keep the cursor line inside the viewport
+    let mut scroll = state.config_editor_scroll;
+    if cursor_line < scroll {
+        scroll = cursor_line;
+    } else if cursor_line >= scroll + viewport_height {
+        scroll = cursor_line + 1 - viewport_height;
+    }
+    scroll = scroll.min(state.config_editor_text.len().saturating_sub(viewport_height));
+    state.config_editor_scroll = scroll;
+
+    let lines: Vec<Line> = state.config_editor_text.iter()
+        .enumerate()
+        .skip(scroll)
+        .take(viewport_height)
+        .map(|(i, text)| {
+            let is_cursor_line = i == cursor_line;
+            let mut line = Line::from(vec![
+                Span::raw(format!("{:>4} ", i + 1)).fg(Color::DarkGray),
+                Span::raw(text.clone()),
+            ]);
+            if is_cursor_line {
+                line = line.style(Style::new().bg(Color::DarkGray));
+            }
+            line
+        })
+        .collect();
+
+    let para = Paragraph::new(lines);
+    f.render_widget(para, inner);
+
+    // Cursor: a block on the cursor cell, drawn after the text
+    let cursor_in_view = cursor_line >= scroll && cursor_line < scroll + viewport_height;
+    if cursor_in_view {
+        let cursor_y = inner.y + (cursor_line - scroll) as u16;
+        let cursor_x = inner.x + 5 + cursor_col as u16;
+        if cursor_x < inner.x + inner.width {
+            let cell = Rect {
+                x: cursor_x,
+                y: cursor_y,
+                width: 1,
+                height: 1,
+            };
+            f.render_widget(
+                Paragraph::new(" ").style(Style::new().bg(Color::Yellow).fg(Color::Yellow)),
+                cell,
+            );
+        }
+    }
+
+    // Footer: status/error and key hints
+    let footer = match &state.config_editor_error {
+        Some(error) => Line::from(vec![
+            Span::raw(" ").fg(Color::Red),
+            Span::raw(error.clone()).fg(Color::Red).bold(),
+        ]),
+        None => Line::from(vec![
+            Span::raw(" Ctrl+S").bold().fg(Color::Yellow),
+            Span::raw(" save & apply | "),
+            Span::raw("Esc").bold().fg(Color::Red),
+            Span::raw(" cancel | "),
+            Span::raw("Ctrl+E").bold().fg(Color::Yellow),
+            Span::raw(" reopen"),
+        ]),
+    };
+    f.render_widget(Paragraph::new(footer), footer_area);
 }
 
 fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut AppDrawState) {
@@ -2651,7 +3071,6 @@ fn draw_selected_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state:
 
     for (row_index, row) in drawn_rows.iter().enumerate() {
         let in_view = row_index >= scroll && row_index - scroll < viewport_height;
-        let y = list_area.y + (row_index - scroll) as u16;
 
         match row {
             PanelRow::Category(category) => {
@@ -2666,7 +3085,7 @@ fn draw_selected_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state:
                 if in_view {
                     let category_area = Rect {
                         x: list_area.x,
-                        y,
+                        y: list_area.y + (row_index - scroll) as u16,
                         width: list_area.width,
                         height: 1,
                     };
@@ -2700,7 +3119,7 @@ fn draw_selected_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state:
                 if in_view {
                     let item_area = Rect {
                         x: list_area.x,
-                        y,
+                        y: list_area.y + (row_index - scroll) as u16,
                         width: list_area.width,
                         height: 1,
                     };

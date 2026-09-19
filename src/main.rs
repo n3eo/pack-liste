@@ -23,7 +23,7 @@ struct Args {
     force_tui: bool,
 
     /// Packing list file to open or continue
-    /// (bare names resolve to ~/.config/pack-liste/trips/)
+    /// (relative paths resolve against the current folder)
     file: Option<String>,
 }
 

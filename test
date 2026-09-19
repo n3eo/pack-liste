@@ -1,0 +1,628 @@
+weekdays: 7
+travel_style: backpacker
+weather: mixed
+selected_activities:
+- city tour
+- business
+items:
+- name: wasserfeste
+  category: 'Städtereisen: Schuhe'
+  packed: false
+- name: bequeme
+  category: 'Städtereisen: Schuhe'
+  packed: false
+- name: elegante
+  category: 'Städtereisen: Schuhe'
+  packed: false
+- name: FlipFlop
+  category: 'Städtereisen: Schuhe'
+  packed: false
+- name: Hausschuhe
+  category: 'Städtereisen: Schuhe'
+  packed: false
+- name: Unterhosen
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: Socken
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: T-Shirt
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: kurze Hose
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: lange Hose
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: lange Jogginghose
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: kurze Jogginghose
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: Schlaf T-Shirt
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: Schlaf Hose
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: Pulli/Sweatjacke
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: Dünner Pulli/Langärmliges T-Shirt
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: Gürtel
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: Halstuch
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: Wanderhose 2 in 1
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: Hemd
+  category: 'Städtereisen: Klamotten'
+  packed: false
+- name: regendichte Jacke
+  category: 'Städtereisen: Jacken'
+  packed: false
+- name: Softshell
+  category: 'Städtereisen: Jacken'
+  packed: false
+- name: Winterjacke
+  category: 'Städtereisen: Jacken'
+  packed: false
+- name: Sommerjacke
+  category: 'Städtereisen: Jacken'
+  packed: false
+- name: Ärmellose Softshell
+  category: 'Städtereisen: Jacken'
+  packed: false
+- name: Kopfhörer
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Handy-Ladekabel
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Kissen
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Ohropax
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Reiseapotheke
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Reisedesinfekt
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: (Notiz-)Block/Papier
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Stift(e)
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Bargeld (€)
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Messer
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Kaffee-Becher
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Rucksack
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Flasche
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Handtuch groß
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Handtuch klein
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Plastiktüte
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Regenschirm
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: kleine Taschenlampe
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Vesper
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Taschentücher
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Stadtführer/Karte
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Masken (+Medi aus M)
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Turnbeutel/Kleiner Rucksack
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Hut/Kappe
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Sonnencreme
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Wiederverwendbares Besteck
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Powerbank
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Knie Bandage
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Brille
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Studentenfutter
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Büroklammer
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Kaugummi
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Fächer
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Bauchtasche
+  category: 'Städtereisen: Sonstiges'
+  packed: false
+- name: Gewürze
+  category: 'Ferienwohnung: Verpflegung'
+  packed: false
+- name: Essig & Öl
+  category: 'Ferienwohnung: Verpflegung'
+  packed: false
+- name: (Boden-)Decke
+  category: 'Ferienwohnung: Sonstiges'
+  packed: false
+- name: Zahnbürste
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Zahnpasta
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Rasierer nass
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Rasierer trocken
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Deo
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Deo (sprühen)
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Haarwachs/-gel
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Rasierschaum
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Handseife
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Bartgel
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Mückenspray
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Duschgel/Shampoo
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Handcreme
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Pinzette
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Schere
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Wattestäbchen
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Kondome
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Badelatschen
+  category: 'Kulturbeutel: Kulturbeutel'
+  packed: false
+- name: Pflaster
+  category: 'Kulturbeutel: Reiseapotheke'
+  packed: false
+- name: Iberogast
+  category: 'Kulturbeutel: Reiseapotheke'
+  packed: false
+- name: Schmerztabletten
+  category: 'Kulturbeutel: Reiseapotheke'
+  packed: false
+- name: Rei in der Tube
+  category: 'Kulturbeutel: Reiseapotheke'
+  packed: false
+- name: Bepanthen
+  category: 'Kulturbeutel: Reiseapotheke'
+  packed: false
+- name: Reiseapotheke (Klein)
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Bonbons
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Augentropfen
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Handcreme
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Durchfallmittel
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Vitamine
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Fieberthermometer
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Fenistil
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Heizer
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Hustentabletten
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Antibakterielle Creme
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Verbandsmaterial
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Wunddestinfektionsmittel
+  category: 'Kulturbeutel: Reiseapotheke (Groß)'
+  packed: false
+- name: Badehose
+  category: 'Unternehmungen: Strand'
+  packed: false
+- name: (Strand-)Handtuch
+  category: 'Unternehmungen: Strand'
+  packed: false
+- name: Sonnenbrille
+  category: 'Unternehmungen: Strand'
+  packed: false
+- name: Sonnencreme
+  category: 'Unternehmungen: Strand'
+  packed: false
+- name: Apré-Milch
+  category: 'Unternehmungen: Strand'
+  packed: false
+- name: Wickelfisch
+  category: 'Unternehmungen: Strand'
+  packed: false
+- name: Schloss, Schlüssel
+  category: 'Unternehmungen: Fahrrad'
+  packed: false
+- name: Licht vorne
+  category: 'Unternehmungen: Fahrrad'
+  packed: false
+- name: Licht hinten
+  category: 'Unternehmungen: Fahrrad'
+  packed: false
+- name: Tacho
+  category: 'Unternehmungen: Fahrrad'
+  packed: false
+- name: Helm
+  category: 'Unternehmungen: Fahrrad'
+  packed: false
+- name: Handschuhe
+  category: 'Unternehmungen: Fahrrad'
+  packed: false
+- name: Werkzeug
+  category: 'Unternehmungen: Fahrrad'
+  packed: false
+- name: Pumpe
+  category: 'Unternehmungen: Fahrrad'
+  packed: false
+- name: Erste Hilfe Kit
+  category: 'Unternehmungen: Fahrrad'
+  packed: false
+- name: Ärmellose Softshell
+  category: 'Unternehmungen: Fahrrad'
+  packed: false
+- name: Tischtennisschläger
+  category: 'Unternehmungen: Sport'
+  packed: false
+- name: Ball
+  category: 'Unternehmungen: Sport'
+  packed: false
+- name: Bücher
+  category: 'Unternehmungen: Sonstiges'
+  packed: false
+- name: Ebook Reader
+  category: 'Unternehmungen: Sonstiges'
+  packed: false
+- name: Spielkarten
+  category: 'Unternehmungen: Sonstiges'
+  packed: false
+- name: Brille
+  category: 'Unternehmungen: Auto'
+  packed: false
+- name: Ersatzschlüssel
+  category: 'Unternehmungen: Auto'
+  packed: false
+- name: Wanderschuhe
+  category: 'Unternehmungen: Wandern'
+  packed: false
+- name: Trinkflasche
+  category: 'Unternehmungen: Wandern'
+  packed: false
+- name: Lange/dicke socken
+  category: 'Unternehmungen: Wandern'
+  packed: false
+- name: Wanderhose
+  category: 'Unternehmungen: Wandern'
+  packed: false
+- name: Wanderrucksack
+  category: 'Unternehmungen: Wandern'
+  packed: false
+- name: Helm
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Ski hose
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Ski Jacke
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Ski brille
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Lange unterhosen
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Hohe Schuhe
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Handschuhe
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Stumhaube
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Halstuch
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: UV lippen stift + gescht creme
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Gürtel
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Ski Socken
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Kleine Flasche
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Ski Schuhe
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Ski
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Ski Stöcke
+  category: 'Unternehmungen: Ski fahren'
+  packed: false
+- name: Handtuch
+  category: 'Unternehmungen: Schwimmen'
+  packed: false
+- name: Schwimmbrille
+  category: 'Unternehmungen: Schwimmen'
+  packed: false
+- name: Badehose
+  category: 'Unternehmungen: Schwimmen'
+  packed: false
+- name: Mütze
+  category: 'Unternehmungen: Winter'
+  packed: false
+- name: Handschuhe
+  category: 'Unternehmungen: Winter'
+  packed: false
+- name: Lange Unterhosen
+  category: 'Unternehmungen: Winter'
+  packed: false
+- name: Handtuch
+  category: 'Unternehmungen: Gym'
+  packed: false
+- name: Sporthose
+  category: 'Unternehmungen: Gym'
+  packed: false
+- name: Sportschuhe
+  category: 'Unternehmungen: Gym'
+  packed: false
+- name: Ladekabel
+  category: 'Technik: Laptop'
+  packed: false
+- name: HDMI-Kabel
+  category: 'Technik: Laptop'
+  packed: false
+- name: Mehrfachstecker
+  category: 'Technik: Laptop'
+  packed: false
+- name: HDD mit Filmen
+  category: 'Technik: Laptop'
+  packed: false
+- name: Powerbank
+  category: 'Technik: Laptop'
+  packed: false
+- name: Kopfhörer
+  category: 'Technik: Handy'
+  packed: false
+- name: Ladekabel
+  category: 'Technik: Handy'
+  packed: false
+- name: Over ear
+  category: 'Technik: Audio'
+  packed: false
+- name: In ear
+  category: 'Technik: Audio'
+  packed: false
+- name: In ear kabellos
+  category: 'Technik: Audio'
+  packed: false
+- name: Ladekabel
+  category: 'Technik: IPad'
+  packed: false
+- name: Tastatur
+  category: 'Technik: IPad'
+  packed: false
+- name: USB-C Adapter
+  category: 'Technik: IPad'
+  packed: false
+- name: Ladekabel
+  category: 'Technik: Smartwach'
+  packed: false
+- name: Kreditkarte
+  category: 'Dokumente_Karte: Dokumente/Karten'
+  packed: false
+- name: Bankkarte
+  category: 'Dokumente_Karte: Dokumente/Karten'
+  packed: false
+- name: Ausweis
+  category: 'Dokumente_Karte: Dokumente/Karten'
+  packed: false
+- name: Reisepass
+  category: 'Dokumente_Karte: Dokumente/Karten'
+  packed: false
+- name: Führerschein
+  category: 'Dokumente_Karte: Dokumente/Karten'
+  packed: false
+- name: Krankenkassenkarte
+  category: 'Ferienwohnung: Sonstiges'
+  packed: false
+- name: Tickets
+  category: 'Dokumente_Karte: Dokumente/Karten'
+  packed: false
+- name: Reservierungen
+  category: 'Dokumente_Karte: Dokumente/Karten'
+  packed: false
+- name: Studentenausweis
+  category: 'Dokumente_Karte: Dokumente/Karten'
+  packed: false
+- name: Jugendherbergeausweis
+  category: 'Dokumente_Karte: Dokumente/Karten'
+  packed: false
+- name: Bücher
+  category: 'Dokumente_Karte: Unterhaltung'
+  packed: false
+- name: Zeitschrift
+  category: 'Dokumente_Karte: Unterhaltung'
+  packed: false
+- name: Email-Laptop
+  category: 'Geschäftsreise: Technik'
+  packed: false
+- name: Ladekabel
+  category: 'Geschäftsreise: Technik'
+  packed: false
+- name: Unterlagen
+  category: 'Geschäftsreise: Technik'
+  packed: false
+- name: Handy
+  category: 'Geschäftsreise: Technik'
+  packed: false
+- name: Yubi-Key
+  category: 'Geschäftsreise: Technik'
+  packed: false
+- name: Hemd
+  category: 'Geschäftsreise: Klamotten'
+  packed: false
+- name: Sakko
+  category: 'Geschäftsreise: Klamotten'
+  packed: false
+- name: Gute Hose
+  category: 'Geschäftsreise: Klamotten'
+  packed: false
+- name: Airbus-Polo
+  category: 'Geschäftsreise: Klamotten'
+  packed: false
+- name: Weißes Tshirt
+  category: 'Geschäftsreise: Klamotten'
+  packed: false
+- name: Badge
+  category: 'Geschäftsreise: Dokumente'
+  packed: false
+- name: Bargeld (Landeswährung)
+  category: 'Ausland: Ausland'
+  packed: true
+- name: Steckdosenadapter
+  category: 'Ausland: Ausland'
+  packed: true
+- name: Führerschein international
+  category: 'Ausland: Karten'
+  packed: false
+- name: Auslandreiseversicherung
+  category: 'Ausland: Karten'
+  packed: false
+- name: Impfpass
+  category: 'Ausland: Karten'
+  packed: false
+- name: Unterhose
+  category: 'Ausland: Handgepäck'
+  packed: false
+- name: Zahnbürste
+  category: 'Ausland: Handgepäck'
+  packed: false
+- name: Zahnpasta
+  category: 'Ausland: Handgepäck'
+  packed: false
+- name: T-Shirt
+  category: 'Ausland: Handgepäck'
+  packed: false
+- name: Kleines Handtuch
+  category: 'Ausland: Handgepäck'
+  packed: false
+- name: Nackenkissen
+  category: 'Reiseart: Flugzeug'
+  packed: false
+- name: Ersatzschlüssel
+  category: 'Reiseart: Auto'
+  packed: false
+- name: Sonnenbrill
+  category: 'Reiseart: Auto'
+  packed: false
+- name: Autobrille
+  category: 'Reiseart: Auto'
+  packed: false
+- name: Leinenschalfsack
+  category: 'Reiseart: Hütte'
+  packed: false
+- name: Hausschuhe
+  category: 'Reiseart: Hütte'
+  packed: false
+- name: FIPS Ausweis
+  category: 'Reiseart: Bahn'
+  packed: false
+- name: Bahn Ausweis
+  category: 'Reiseart: Bahn'
+  packed: false
+- name: Tickets
+  category: 'Reiseart: Bahn'
+  packed: false
