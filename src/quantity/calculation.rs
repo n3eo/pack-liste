@@ -67,3 +67,59 @@ impl Default for QuantityCalculation {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::weekdays::Weekdays;
+
+    fn input(weekdays: u32, style: f32, weather: f32, activities: &[f32]) -> QuantityCalculationInput {
+        QuantityCalculationInput {
+            weekdays: Weekdays::new(weekdays).unwrap(),
+            item_count: 3,
+            travel_style: "test-style".to_string(),
+            travel_style_multiplier: style,
+            weather: "test-weather".to_string(),
+            weather_multiplier: weather,
+            activities: activities.iter().map(|_| "activity".to_string()).collect(),
+            activity_multipliers: activities.to_vec(),
+        }
+    }
+
+    #[test]
+    fn base_quantity_is_weekdays_times_multipliers() {
+        // 7 days, standard (1.0), cold (1.5), no activities
+        let out = QuantityCalculation.calculate(&input(7, 1.0, 1.5, &[])).unwrap();
+        assert_eq!(out.item_quantities, vec![11, 11, 11]); // 7 * 1.5 = 10.5 -> 11
+        assert_eq!(out.total_items, 33);
+    }
+
+    #[test]
+    fn activities_replace_weather_multiplier() {
+        // Activities take priority: average of [1.0, 2.0] = 1.5 replaces weather 0.7
+        let out = QuantityCalculation.calculate(&input(7, 1.0, 0.7, &[1.0, 2.0])).unwrap();
+        assert_eq!(out.item_quantities, vec![11, 11, 11]); // 7 * 1.5 = 10.5 -> 11
+        assert!(out.calculation_notes.contains("take priority"));
+    }
+
+    #[test]
+    fn quantity_is_capped_at_twenty() {
+        // 30 days * 1.5 * 2.0 = 90 -> capped base 20, then 20 * 3.0 = 60
+        // Base itself is capped at 20 before multipliers
+        let out = QuantityCalculation.calculate(&input(30, 1.5, 2.0, &[])).unwrap();
+        assert_eq!(out.item_quantities, vec![60, 60, 60]);
+    }
+
+    #[test]
+    fn quantity_never_drops_below_one() {
+        // 1 day * 0.5 * 0.7 = 0.35 -> rounds to 0 -> clamped to 1
+        let out = QuantityCalculation.calculate(&input(1, 0.5, 0.7, &[])).unwrap();
+        assert_eq!(out.item_quantities, vec![1, 1, 1]);
+    }
+
+    #[test]
+    fn output_length_matches_item_count() {
+        let out = QuantityCalculation.calculate(&input(7, 1.0, 1.0, &[])).unwrap();
+        assert_eq!(out.item_quantities.len(), 3);
+    }
+}

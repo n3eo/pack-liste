@@ -110,6 +110,56 @@ fn default_weather_name() -> String {
     "mixed".to_string()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_config_without_trip_params_loads() {
+        // Config files written before the modifiers feature only had
+        // categories and items; they must keep loading with defaults
+        let yaml = "categories:\n- Clothing\nitems:\n- name: T-Shirt\n  category: Clothing\n  quantity: 5\n";
+        let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.items.len(), 1);
+        assert_eq!(config.items[0].name, "T-Shirt");
+        assert_eq!(config.weekdays, 0); // serde default, clamped to Weekdays default on load
+        assert_eq!(config.travel_style, "standard");
+        assert_eq!(config.weather, "mixed");
+        assert!(config.selected_activities.is_empty());
+        assert!(!config.modifiers.travel_styles.is_empty());
+        assert!(!config.modifiers.weather.is_empty());
+        assert!(!config.modifiers.activities.is_empty());
+    }
+
+    #[test]
+    fn full_config_round_trips() {
+        let config = AppConfig {
+            categories: vec!["Clothing".to_string()],
+            items: vec![SavedItem {
+                name: "T-Shirt".to_string(),
+                category: "Clothing".to_string(),
+                quantity: 5,
+            }],
+            weekdays: 10,
+            travel_style: "luxury".to_string(),
+            weather: "snowy".to_string(),
+            selected_activities: vec!["skiing".to_string()],
+            modifiers: ModifiersConfig::default(),
+        };
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        let parsed: AppConfig = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed.weekdays, 10);
+        assert_eq!(parsed.travel_style, "luxury");
+        assert_eq!(parsed.weather, "snowy");
+        assert_eq!(parsed.selected_activities, vec!["skiing".to_string()]);
+        assert_eq!(parsed.items[0].quantity, 5);
+        assert_eq!(
+            parsed.modifiers.travel_style_multiplier("luxury"),
+            Some(1.5)
+        );
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct SavedItem {
     name: String,
@@ -1164,6 +1214,7 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
             Constraint::Length(4),
             Constraint::Length(4),
             Constraint::Length(4),
+            Constraint::Min(6),
         ])
         .split(content_area);
 
@@ -1237,15 +1288,26 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
             Style::new()
         });
 
-    let activities_area = Rect {
-        x: params_layout[2].x,
-        y: params_layout[2].y + params_layout[2].height,
-        width: params_layout[2].width,
-        height: 8.min(state.modifiers.activities.len() as u16 + 2),
+    let activities_area = params_layout[3];
+    let activities_inner = Rect {
+        x: activities_area.x + 1,
+        y: activities_area.y + 1,
+        width: activities_area.width.saturating_sub(2),
+        height: activities_area.height.saturating_sub(2),
+    };
+
+    // Window the activity list so the cursor stays visible
+    let viewport_height = activities_inner.height as usize;
+    let activity_scroll = if state.activity_cursor >= viewport_height {
+        state.activity_cursor + 1 - viewport_height
+    } else {
+        0
     };
 
     let activity_lines: Vec<Line> = state.modifiers.activities.iter()
         .enumerate()
+        .skip(activity_scroll)
+        .take(viewport_height)
         .map(|(i, activity)| {
             let is_selected = state.selected_activities.contains(&activity.name);
             let is_cursor = state.focus == Focus::Activities && i == state.activity_cursor;
@@ -1266,12 +1328,7 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
 
     let activities_para = Paragraph::new(activity_lines);
     f.render_widget(activities_block, activities_area);
-    f.render_widget(activities_para, Rect {
-        x: activities_area.x + 1,
-        y: activities_area.y + 1,
-        width: activities_area.width.saturating_sub(2),
-        height: activities_area.height.saturating_sub(2),
-    });
+    f.render_widget(activities_para, activities_inner);
 
     // Instructions
     let instructions = Paragraph::new(vec![
@@ -1333,11 +1390,15 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
         Line::from(""),
         Line::from(vec![
             Span::raw("Up/Down").bold().fg(Color::Yellow),
-            Span::raw(" - Adjust weekdays / Cycle options"),
+            Span::raw(" - Adjust weekdays / Cycle options / Move activity cursor"),
         ]),
         Line::from(vec![
             Span::raw("+/-").bold().fg(Color::Yellow),
             Span::raw(" - Adjust weekdays"),
+        ]),
+        Line::from(vec![
+            Span::raw("Space").bold().fg(Color::Yellow),
+            Span::raw(" - Toggle activity (in Activities section)"),
         ]),
         Line::from(vec![
             Span::raw("Tab").bold().fg(Color::Yellow),
