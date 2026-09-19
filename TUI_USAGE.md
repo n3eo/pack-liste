@@ -30,118 +30,83 @@ cargo run -- --force-tui
 
 The welcome screen allows you to configure your trip parameters before viewing the packing list.
 
-```
-+-----------------------------------------------------+
-| Welcome to Pack-Liste                               |
-|-----------------------------------------------------|
-| +-------------------------------+                   |
-| | Trip Duration (Weekdays)      |                   |
-| |                               |                   |
-| |  Current: 7 days              |                   |
-| |                               |                   |
-| |  Use +/- to adjust            |                   |
-| +-------------------------------+                   |
-| +-------------------------------+                   |
-| | Travel Style                 |                   |
-| |                               |                   |
-| |  Current: Standard            |                   |
-| |                               |                   |
-| |  Use ↑/↓ to cycle through     |                   |
-| +-------------------------------+                   |
-| +-------------------------------+                   |
-| | Weather                      |                   |
-| |                               |                   |
-| |  Current: Mixed              |                   |
-| |                               |                   |
-| |  Use ↑/↓ to cycle through     |                   |
-| +-------------------------------+                   |
-| +-------------------------------+                   |
-| | Activities                   |                   |
-| |                               |                   |
-| |  Current: None               |                   |
-| |                               |                   |
-| |  Use ↑/↓ to toggle            |                   |
-| +-------------------------------+                   |
-| Tab to navigate between fields                       |
-| Enter to continue to packing list                     |
-| q to quit                                            |
-+-----------------------------------------------------+
-```
+### Features
+- **Trip Duration**: Set number of weekdays (1-30)
+- **Travel Style**: Choose from Minimalist, Standard, Luxury, Backpacker
+- **Weather**: Choose from Hot, Cold, Rainy, Snowy, Mixed
+- **Activities**: Toggle activities on/off
 
 ### Navigation
-
 - **Tab**: Move focus to next field
 - **Shift+Tab**: Move focus to previous field
 - **Focused field** is highlighted with a yellow border
 
 ### Value Adjustment
+- **Weekdays**: Use **+** or **-** to increase/decrease
+- **Travel Style/Weather/Activities**: Use **↑** or **↓** to cycle through options
 
-- **Weekdays**: Use **+** or **-** to increase/decrease the number of days (1-30)
-- **Travel Style**: Use **↑** or **↓** to cycle through options
-- **Weather**: Use **↑** or **↓** to cycle through options
-- **Activities**: Use **↑** or **↓** to toggle activities
-
-### Continue to Main Screen
-
-- **Enter**: After configuring all parameters, press Enter to continue to the main packing list screen
+### Continue
+- **Enter**: Continue to main packing list screen
+- **q**: Quit application
 
 ## Screen 2: Main Screen
 
 The main screen shows categories and items on the left, and the compiled packing list on the right.
 
-```
-+---------------------+---------------------+
-| Categories & Items  | Compiled Packing List|
-|---------------------+---------------------|
-| ▼ Clothing          | ▼ Clothing          |
-|   ✓ T-Shirts x 7   |   ✓ T-Shirts x 7   |
-|   ○ Pants x 5       |   ○ Pants x 5       |
-|   ○ Socks x 7       |   ○ Socks x 7       |
-|   ○ Underwear x 7   |   ○ Underwear x 7   |
-|                     |                     |
-| ▼ Toiletries        | ▼ Toiletries        |
-|   ✓ Toothbrush x 1 |   ✓ Toothbrush x 1 |
-|   ✓ Toothpaste x 1 |   ✓ Toothpaste x 1 |
-|   ✓ Shampoo x 1    |   ✓ Shampoo x 1    |
-|                     |                     |
-| ▼ Documents         | ▼ Documents         |
-|   ✓ Passport x 1   |   ✓ Passport x 1   |
-|   ✓ Tickets x 1    |   ✓ Tickets x 1    |
-|                     |                     |
-|                     | Total Items: 9      |
-|                     | Packed: 6           |
-|                     | Unpacked: 3         |
-|                     | Progress: 67%       |
-|                     |                     |
-| Tab to switch panels|                     |
-| C to collapse/expand|                     |
-| Space to mark done  |                     |
-+---------------------+---------------------+
-```
+### Left Panel: Categories & Items
+- Shows all categories with their items
+- Categories can be **collapsed** (▶) or **expanded** (▼)
+- Items show their packed status: **✓** (packed) or **○** (not packed)
+- All items are **preselected** by default
+- Shows item name and calculated quantity
+
+### Right Panel: Compiled Packing List
+- Shows the same items grouped by category
+- Categories can be collapsed/expanded independently
+- Shows statistics at the bottom
 
 ### Features
 
-1. **Collapsible Categories**: Each category can be collapsed or expanded
+1. **Collapsible Categories**
    - **▼**: Category is expanded (items visible)
    - **▶**: Category is collapsed (items hidden)
+   - Press **C** to toggle collapse/expand
 
-2. **Item Status**: Each item shows its packed status
+2. **Item Status**
    - **✓**: Item is marked as packed
    - **○**: Item is not packed
+   - Press **Space** to toggle packed status
 
-3. **Live Quantities**: Item quantities are calculated based on your trip parameters from the welcome screen
+3. **Item Selection**
+   - All items are preselected by default
+   - Press **X** to exclude/include entire category
+   - Press **Enter** to toggle individual item selection
+
+4. **Add/Remove Items**
+   - Press **A** to add a new item to the current category
+   - Press **D** to remove the selected item
+
+5. **Live Quantities**
+   - Item quantities are calculated based on trip parameters
+   - Quantities update automatically
 
 ### Navigation
-
-- **Tab**: Switch between left panel (categories/items) and right panel (compiled list)
+- **Tab**: Switch between left and right panels
 - **↑/↓**: Navigate up and down through categories and items
-- **Current focus** is highlighted
+- **Current selection** is highlighted with yellow
 
 ### Actions
-
-- **C**: Collapse or expand the current category
-- **Space**: Mark the current item or all items in the current category as done/undone
-- **Enter**: Select (action depends on context)
+| Key | Action |
+|-----|--------|
+| Tab | Switch between left and right panels |
+| ↑/↓ | Navigate through categories/items |
+| C | Collapse/expand current category |
+| Space | Toggle packed status of selected item |
+| Enter | Toggle selection of selected item |
+| A | Add new item to current category |
+| D | Remove selected item |
+| X | Toggle all items in category as selected/excluded |
+| q | Quit application |
 
 ### Statistics
 
@@ -150,34 +115,6 @@ The right panel shows:
 - **Packed**: Number of items marked as packed
 - **Unpacked**: Number of items not yet packed
 - **Progress**: Percentage of items packed
-
-## Key Bindings Summary
-
-### Welcome Screen
-
-| Key | Action |
-|-----|--------|
-| Tab | Next field |
-| Shift+Tab | Previous field |
-| + | Increase weekdays |
-| - | Decrease weekdays |
-| ↑ | Cycle up (travel style, weather, activities) |
-| ↓ | Cycle down (travel style, weather, activities) |
-| Enter | Continue to main screen |
-| q | Quit application |
-
-### Main Screen
-
-| Key | Action |
-|-----|--------|
-| Tab | Switch between left and right panels |
-| Shift+Tab | Switch between left and right panels |
-| ↑ | Navigate up |
-| ↓ | Navigate down |
-| C | Collapse/expand current category |
-| Space | Mark item/category as done/undone |
-| Enter | Select |
-| q | Quit application |
 
 ## Example Workflow
 
@@ -193,18 +130,46 @@ The right panel shows:
 8. Use **↓** to set to Cold
 9. Use **Tab** to navigate to Activities
 10. Use **↓** to add Hiking activity
-11. Press **Enter** to continue
+11. Press **Enter** to continue to main screen
 
 ### Managing Your Packing List
 
 1. You'll see the Main Screen with categories on left and compiled list on right
-2. Use **Tab** to switch to the right panel
-3. Use **C** to collapse a category
-4. Use **C** again to expand it
-5. Use **Space** to mark all items in a category as packed
-6. Use **Space** again to mark them as unpacked
-7. Use **Tab** to switch back to left panel
-8. Press **q** to quit when done
+2. Use **↑/↓** to navigate through categories
+3. Press **C** to collapse a category
+4. Press **C** again to expand it
+5. Use **↑/↓** to navigate to an item
+6. Press **Space** to mark the item as packed (✓)
+7. Press **Space** again to mark it as unpacked (○)
+8. Press **A** to add a new item to the current category
+9. Press **D** to remove the selected item
+10. Press **X** to exclude all items in a category
+11. Press **Tab** to switch to the right panel
+12. Press **q** to quit when done
+
+## Key Bindings Summary
+
+### Welcome Screen
+| Key | Action |
+|-----|--------|
+| Tab / Shift+Tab | Navigate between fields |
+| + / - | Adjust weekdays |
+| ↑ / ↓ | Cycle through options |
+| Enter | Continue to main screen |
+| q | Quit |
+
+### Main Screen
+| Key | Action |
+|-----|--------|
+| Tab | Switch between panels |
+| ↑ / ↓ | Navigate |
+| C | Collapse/expand category |
+| Space | Toggle packed status |
+| Enter | Toggle item selection |
+| A | Add item |
+| D | Remove item |
+| X | Toggle category selection |
+| q | Quit |
 
 ## Configuration
 
@@ -249,12 +214,51 @@ The application should work in:
 - Memory usage: <100MB
 - No unsafe Rust code
 
-## Future Enhancements
+## Implementation Notes
 
-- [ ] Proper dropdown menus for selection in welcome screen
-- [ ] Individual item selection (not just category-wide)
-- [ ] Edit individual item quantities
-- [ ] Save/load packing list configurations
-- [ ] Multiple packing list management
-- [ ] Search/filter items
-- [ ] Export packing list to PDF/print
+### Features Implemented
+
+✅ **Welcome Screen**
+- Trip parameter configuration
+- No packing list shown on right
+- Clean layout with instructions
+
+✅ **Main Screen**
+- Split screen layout (categories left, compiled list right)
+- All items preselected
+- Categories and items displayed
+
+✅ **Collapsible Categories**
+- Each category can be collapsed/expanded
+- ▼ symbol for expanded
+- ▶ symbol for collapsed
+- Press C to toggle
+
+✅ **Navigation**
+- Tab to switch between panels
+- ↑/↓ to navigate through categories/items
+- Current selection highlighted
+
+✅ **Mark as Packed**
+- Space to toggle individual item packed status
+- ✓ for packed, ○ for unpacked
+- Progress percentage calculated
+
+✅ **Add/Remove Items**
+- A to add new item to current category
+- D to remove selected item
+- Items are added with default quantity of 1
+
+✅ **Category Selection**
+- X to toggle all items in category as selected/excluded
+- Excluded items are hidden from the display
+
+### Features Not Yet Implemented
+
+- Individual item quantity editing
+- Save/load packing list configurations
+- Multiple packing list management
+- Export packing list to file
+- Import packing list from file
+- Search/filter items
+- Custom item creation with name/quantity

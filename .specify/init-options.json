@@ -1,8 +1,9 @@
 {
-  "ai": "opencode",
+  "ai": "vibe",
+  "ai_skills": true,
   "feature_numbering": "sequential",
   "here": false,
-  "integration": "opencode",
+  "integration": "vibe",
   "script": "sh",
   "speckit_version": "1.0.6"
 }
