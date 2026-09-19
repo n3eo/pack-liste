@@ -22,8 +22,8 @@ struct Args {
     #[arg(long)]
     force_tui: bool,
 
-    /// Packing list file to continue (saved under ~/.config/pack-liste/trips/)
-    #[arg(short, long)]
+    /// Packing list file to open or continue
+    /// (bare names resolve to ~/.config/pack-liste/trips/)
     file: Option<String>,
 }
 

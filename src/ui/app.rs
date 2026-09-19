@@ -15,7 +15,7 @@ use ratatui::{
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, stdout};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::modifiers::ModifiersConfig;
 use crate::config::trip_file::{TripFile, TripItem};
@@ -231,7 +231,6 @@ mod tests {
     #[test]
     fn trip_file_round_trips_and_reconciles() {
         use crate::config::trip_file::{TripFile, TripItem};
-
         let mut trip = TripFile {
             weekdays: 7,
             travel_style: "standard".to_string(),
@@ -262,6 +261,32 @@ mod tests {
         assert_eq!(parsed.items.len(), 1);
         assert!(parsed.items[0].packed);
     }
+
+    #[test]
+    fn trip_paths_resolve_relative_absolute_and_tilde() {
+        let trips_dir = Path::new("/home/user/.config/pack-liste/trips");
+
+        // Bare and relative names resolve into the trips directory
+        assert_eq!(
+            resolve_trip_path("my-trip.yaml", trips_dir),
+            Path::new("/home/user/.config/pack-liste/trips/my-trip.yaml")
+        );
+        assert_eq!(
+            resolve_trip_path("sub/my-trip.yaml", trips_dir),
+            Path::new("/home/user/.config/pack-liste/trips/sub/my-trip.yaml")
+        );
+
+        // Absolute paths are kept as-is
+        assert_eq!(
+            resolve_trip_path("/tmp/my-trip.yaml", trips_dir),
+            Path::new("/tmp/my-trip.yaml")
+        );
+
+        // ~ expands to the home directory
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(resolve_trip_path("~/my-trip.yaml", trips_dir), home.join("my-trip.yaml"));
+        assert_eq!(resolve_trip_path("~", trips_dir), home);
+    }
 }
 
 // State for drawing (cloneable)
@@ -282,9 +307,9 @@ struct AppDrawState {
     left_scroll: usize,
     right_scroll: usize,
     activity_cursor: usize,
-    /// File name of the packing list to persist (without directory)
-    trip_file_name: String,
-    /// Text input for the trip file name on the welcome screen
+    /// Path of the packing list file to persist (where the trip is saved on exit)
+    trip_file_path: PathBuf,
+    /// Text input for the trip file path on the welcome screen
     trip_file_input: String,
     /// Whether the trip file name is being edited
     editing_trip_file: bool,
@@ -439,9 +464,11 @@ impl App {
             create_default_config(&config_file)?
         };
 
-        // Resolve the trip file: CLI arg wins, else the name saved in the config
-        let trip_file_name = trip_file_arg
+        // Resolve the trip file: CLI arg wins, else the path saved in the config
+        let trip_file_path = trip_file_arg
             .or_else(|| trip_params.last_trip_file.clone())
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| resolve_trip_path(&s, &trips_dir))
             .unwrap_or_default();
 
         // Trip parameters, possibly overridden by a loaded trip file
@@ -450,10 +477,9 @@ impl App {
         let mut weather = trip_params.weather;
         let mut selected_activities = trip_params.selected_activities;
 
-        // Load and reconcile the trip file if it exists
-        if !trip_file_name.is_empty() {
-            let trip_path = trips_dir.join(&trip_file_name);
-            if let Some(mut trip) = TripFile::load(&trip_path)? {
+        // Load and reconcile the trip file if a path is set
+        if !trip_file_path.as_os_str().is_empty() {
+            if let Some(mut trip) = TripFile::load(&trip_file_path)? {
                 // Reconcile selected items against the current input config
                 let config_items: Vec<(String, String)> = packing_list.items.iter()
                     .map(|item| (item.name.clone(), item.category.clone()))
@@ -494,7 +520,7 @@ impl App {
             left_scroll: 0,
             right_scroll: 0,
             activity_cursor: 0,
-            trip_file_name,
+            trip_file_path,
             trip_file_input: String::new(),
             editing_trip_file: false,
             config_section: ConfigSection::TravelStyles,
@@ -537,10 +563,10 @@ impl App {
             weather: self.draw_state.weather.clone(),
             selected_activities: self.draw_state.selected_activities.clone(),
             modifiers: self.draw_state.modifiers.clone(),
-            last_trip_file: if self.draw_state.trip_file_name.is_empty() {
+            last_trip_file: if self.draw_state.trip_file_path.as_os_str().is_empty() {
                 None
             } else {
-                Some(self.draw_state.trip_file_name.clone())
+                Some(self.draw_state.trip_file_path.display().to_string())
             },
         };
 
@@ -562,7 +588,7 @@ impl App {
     /// Persist the compiled packing list to the trip file, in place.
     /// Quantities are not persisted; they are recalculated on load.
     fn save_trip_file(&self) -> Result<()> {
-        if self.draw_state.trip_file_name.is_empty() {
+        if self.draw_state.trip_file_path.as_os_str().is_empty() {
             return Ok(());
         }
 
@@ -581,7 +607,7 @@ impl App {
                 .collect(),
         };
 
-        trip.save(&self.trips_dir.join(&self.draw_state.trip_file_name))
+        trip.save(&self.draw_state.trip_file_path)
     }
 
     fn get_unique_categories(&self) -> Vec<String> {
@@ -591,6 +617,50 @@ impl App {
         categories.sort();
         categories.dedup();
         categories
+    }
+
+    /// Set the trip file path from user input and load that trip file if it
+    /// exists, restoring its trip parameters and packed state.
+    fn apply_trip_file_path(&mut self, input: &str) -> Result<()> {
+        let path = resolve_trip_path(input, &self.trips_dir);
+        self.draw_state.trip_file_path = path.clone();
+        self.draw_state.editing_trip_file = false;
+
+        // Load the trip file if it exists; a missing file means a new trip
+        let Some(mut trip) = TripFile::load(&path)? else {
+            // A fresh path starts from a clean selection state
+            for item in &mut self.draw_state.packing_list.items {
+                item.editable = false;
+                item.packed = false;
+            }
+            return self.update_quantities();
+        };
+
+        // Reconcile selected items against the current input config
+        let config_items: Vec<(String, String)> = self.draw_state.packing_list.items.iter()
+            .map(|item| (item.name.clone(), item.category.clone()))
+            .collect();
+        trip.reconcile(&config_items);
+
+        // Restore trip parameters from the trip file
+        self.draw_state.weekdays = Weekdays::new(trip.weekdays).unwrap_or(self.draw_state.weekdays);
+        self.draw_state.travel_style = trip.travel_style;
+        self.draw_state.weather = trip.weather;
+        self.draw_state.selected_activities = trip.selected_activities;
+
+        // Reset the previous trip's selection, then restore from the file
+        for item in &mut self.draw_state.packing_list.items {
+            item.editable = false;
+            item.packed = false;
+            if let Some(t) = trip.items.iter()
+                .find(|t| t.name.eq_ignore_ascii_case(&item.name))
+            {
+                item.editable = true;
+                item.packed = t.packed;
+            }
+        }
+
+        self.update_quantities()
     }
 
     fn get_all_categories(&self) -> Vec<String> {
@@ -835,15 +905,14 @@ impl App {
                         return self.handle_config_screen_input(key);
                     }
 
-                    // Trip file name editing on the welcome screen
+                    // Trip file path editing on the welcome screen
                     if self.draw_state.screen == Screen::Welcome && self.draw_state.editing_trip_file {
                         match key.code {
                             KeyCode::Enter => {
-                                let name = self.draw_state.trip_file_input.trim().to_string();
-                                // The file name is required: empty input keeps the editor open
-                                if !name.is_empty() {
-                                    self.draw_state.trip_file_name = name;
-                                    self.draw_state.editing_trip_file = false;
+                                let input = self.draw_state.trip_file_input.trim().to_string();
+                                // The file path is required: empty input keeps the editor open
+                                if !input.is_empty() {
+                                    self.apply_trip_file_path(&input)?;
                                 }
                             }
                             KeyCode::Esc => {
@@ -905,11 +974,11 @@ impl App {
                             match self.draw_state.screen {
                                 Screen::Welcome => {
                                     // Enter on the file field opens its editor;
-                                    // a file name is required to continue
+                                    // a file path is required to continue
                                     if self.draw_state.focus == Focus::TripFile
-                                        || self.draw_state.trip_file_name.trim().is_empty()
+                                        || self.draw_state.trip_file_path.as_os_str().is_empty()
                                     {
-                                        self.draw_state.trip_file_input = self.draw_state.trip_file_name.clone();
+                                        self.draw_state.trip_file_input = self.draw_state.trip_file_path.display().to_string();
                                         self.draw_state.editing_trip_file = true;
                                     } else {
                                         // Move to main screen after configuring
@@ -1104,8 +1173,8 @@ impl App {
                         }
                         KeyCode::Char('f') | KeyCode::Char('F') => {
                             if self.draw_state.screen == Screen::Welcome {
-                                // Edit the trip file name
-                                self.draw_state.trip_file_input = self.draw_state.trip_file_name.clone();
+                                // Edit the trip file path
+                                self.draw_state.trip_file_input = self.draw_state.trip_file_path.display().to_string();
                                 self.draw_state.editing_trip_file = true;
                             }
                         }
@@ -1756,6 +1825,29 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
+/// Resolve a user-entered trip file path:
+/// - `~` and `~/...` expand to the home directory
+/// - relative paths resolve against the trips directory
+/// - absolute paths are kept as-is
+fn resolve_trip_path(input: &str, trips_dir: &Path) -> PathBuf {
+    let trimmed = input.trim();
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    } else if trimmed == "~" {
+        if let Some(home) = dirs::home_dir() {
+            return home;
+        }
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        trips_dir.join(path)
+    }
+}
+
 fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDrawState) {
     let [title_area, content_area, instructions_area] = *Layout::default()
         .direction(Direction::Vertical)
@@ -1780,15 +1872,25 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
         .direction(Direction::Vertical)
         .margin(0)
         .constraints([
-            Constraint::Length(4),
-            Constraint::Length(4),
-            Constraint::Length(4),
-            Constraint::Length(4),
-            Constraint::Min(6),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(3),
         ])
         .split(content_area);
 
-    // Trip file name (persist target for the compiled packing list, required)
+    // Inner area of a bordered block (one cell inside each border)
+    let inner = |area: Rect| -> Rect {
+        Rect {
+            x: area.x + 1,
+            y: area.y + 1,
+            width: area.width.saturating_sub(2),
+            height: area.height.saturating_sub(2),
+        }
+    };
+
+    // Trip file path (persist target for the compiled packing list, required)
     let file_block = Block::default()
         .title("Packing List File (Required)")
         .borders(Borders::ALL)
@@ -1800,27 +1902,23 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
 
     let file_text = if state.editing_trip_file {
         vec![
-            Line::from(""),
-            Line::from(format!("  {}_", state.trip_file_input)),
-            Line::from(""),
-            Line::from("  Enter to confirm | Esc to cancel".dim()),
+            Line::from(format!(" {}_", state.trip_file_input)),
+            Line::from(" Enter to confirm | Esc to cancel".dim()),
         ]
     } else {
-        let shown = if state.trip_file_name.is_empty() {
-            "(required - set a name to persist your packing list)".dim()
+        let shown = if state.trip_file_path.as_os_str().is_empty() {
+            "(required - set a path to persist your packing list)".dim()
         } else {
-            state.trip_file_name.clone().into()
+            state.trip_file_path.display().to_string().into()
         };
         vec![
-            Line::from(""),
-            Line::from(vec![Span::raw("  "), shown]),
-            Line::from(""),
-            Line::from("  Enter to edit (saved under ~/.config/pack-liste/trips/)".dim()),
+            Line::from(vec![Span::raw(" "), shown]),
+            Line::from(" Enter to edit (bare names save under ~/.config/pack-liste/trips/)".dim()),
         ]
     };
     let file_para = Paragraph::new(file_text);
     f.render_widget(file_block, params_layout[0]);
-    f.render_widget(file_para, params_layout[0]);
+    f.render_widget(file_para, inner(params_layout[0]));
 
     // Weekdays
     let weekdays_block = Block::default()
@@ -1833,14 +1931,12 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
         });
 
     let weekdays_text = vec![
-        Line::from(""),
-        Line::from(format!("  {} Days", state.weekdays.get())),
-        Line::from(""),
-        Line::from("  Left/Right or +/- to adjust".dim()),
+        Line::from(format!(" {} Days", state.weekdays.get())),
+        Line::from(" Left/Right or +/- to adjust".dim()),
     ];
     let weekdays_para = Paragraph::new(weekdays_text);
     f.render_widget(weekdays_block, params_layout[1]);
-    f.render_widget(weekdays_para, params_layout[1]);
+    f.render_widget(weekdays_para, inner(params_layout[1]));
 
     // Travel Style
     let style_block = Block::default()
@@ -1853,14 +1949,12 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
         });
 
     let style_text = vec![
-        Line::from(""),
-        Line::from(format!("  {}", capitalize_first(&state.travel_style))),
-        Line::from(""),
-        Line::from("  Left/Right to cycle through options".dim()),
+        Line::from(format!(" {}", capitalize_first(&state.travel_style))),
+        Line::from(" Left/Right to cycle through options".dim()),
     ];
     let style_para = Paragraph::new(style_text);
     f.render_widget(style_block, params_layout[2]);
-    f.render_widget(style_para, params_layout[2]);
+    f.render_widget(style_para, inner(params_layout[2]));
 
     // Weather
     let weather_block = Block::default()
@@ -1873,14 +1967,12 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
         });
 
     let weather_text = vec![
-        Line::from(""),
-        Line::from(format!("  {}", capitalize_first(&state.weather))),
-        Line::from(""),
-        Line::from("  Left/Right to cycle through options".dim()),
+        Line::from(format!(" {}", capitalize_first(&state.weather))),
+        Line::from(" Left/Right to cycle through options".dim()),
     ];
     let weather_para = Paragraph::new(weather_text);
     f.render_widget(weather_block, params_layout[3]);
-    f.render_widget(weather_para, params_layout[3]);
+    f.render_widget(weather_para, inner(params_layout[3]));
 
     // Activities (multi-select, scrollable)
     let activities_block = Block::default()
@@ -1893,12 +1985,7 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
         });
 
     let activities_area = params_layout[4];
-    let activities_inner = Rect {
-        x: activities_area.x + 1,
-        y: activities_area.y + 1,
-        width: activities_area.width.saturating_sub(2),
-        height: activities_area.height.saturating_sub(2),
-    };
+    let activities_inner = inner(activities_area);
 
     // Window the activity list so the cursor stays visible
     let viewport_height = activities_inner.height as usize;
@@ -1917,7 +2004,7 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
             let is_cursor = state.focus == Focus::Activities && i == state.activity_cursor;
             let symbol = if is_selected { "[x] " } else { "[ ] " };
             let mut line = Line::from(vec![
-                Span::raw("  "),
+                Span::raw(" "),
                 Span::raw(symbol),
                 Span::raw(capitalize_first(&activity.name)),
             ]);
