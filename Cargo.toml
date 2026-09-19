@@ -1,0 +1,48 @@
+[package]
+name = "pack-liste"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+authors = ["Nico Rumsch <nico@acupof.xyz>"]
+description = "A terminal-based packing list application with dynamic quantity calculation"
+license = "MIT"
+
+[dependencies]
+# TUI Framework
+ratatui = "0.30.2"
+crossterm = "0.29"
+
+# Error Handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# CLI
+clap = { version = "4.0", features = ["derive"] }
+
+# Utilities
+dirs = "7.0.0"
+chrono = "0.4"
+
+[dev-dependencies]
+# Testing
+mockall = "0.15.0"
+tempfile = "3.0"
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+
+[profile.dev]
+opt-level = 1
+
+[[bin]]
+name = "pack-liste"
+path = "src/main.rs"

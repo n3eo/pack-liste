@@ -1,0 +1,37 @@
+# Rust
+/target
+**/target
+*.rs.bk
+*.rlib
+*.prof*
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Environment
+.env*
+
+# OS
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+
+# Exclude local OpenCode agent binaries and system utility launchers
+.opencode/bin/
+.opencode/logs/
+
+# Exclude temporary agent run states, active sessions, and local credential caches
+.specify/notebooks/
+.specify/tmp/
+.specify/session.json
+
+# Never commit your environment files containing LLM API keys
+.env
+
+# Exclude kilo
+.kilo/
