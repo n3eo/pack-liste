@@ -18,17 +18,19 @@ use std::io::{self, stdout};
 use std::path::PathBuf;
 
 use crate::config::modifiers::ModifiersConfig;
+use crate::config::trip_file::{TripFile, TripItem};
 use crate::models::item::Item;
 use crate::models::packing_list::PackingList;
 use crate::models::weekdays::Weekdays;
 use crate::quantity::calculation::QuantityCalculation;
-use crate::quantity::model::QuantityCalculationInput;
+use crate::quantity::model::{ItemQuantitySpec, QuantityCalculationInput};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Screen {
     Welcome,
     Main,
     Help,
+    Config,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -100,6 +102,26 @@ struct AppConfig {
     selected_activities: Vec<String>,
     #[serde(default)]
     modifiers: ModifiersConfig,
+    /// Name of the trip file to continue by default
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_trip_file: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SavedItem {
+    name: String,
+    category: String,
+    /// Only present for fixed-quantity items (auto_quantity: false);
+    /// auto items are recalculated on every load
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    quantity: Option<u32>,
+    /// When false, the quantity is fixed and never recalculated
+    #[serde(default = "default_true")]
+    auto_quantity: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_travel_style_name() -> String {
@@ -122,6 +144,9 @@ mod tests {
         let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.items.len(), 1);
         assert_eq!(config.items[0].name, "T-Shirt");
+        // Old quantity is ignored for auto items; the item recalculates
+        assert!(config.items[0].auto_quantity);
+        assert_eq!(config.items[0].quantity, Some(5)); // kept on load, unused for auto
         assert_eq!(config.weekdays, 0); // serde default, clamped to Weekdays default on load
         assert_eq!(config.travel_style, "standard");
         assert_eq!(config.weather, "mixed");
@@ -135,16 +160,26 @@ mod tests {
     fn full_config_round_trips() {
         let config = AppConfig {
             categories: vec!["Clothing".to_string()],
-            items: vec![SavedItem {
-                name: "T-Shirt".to_string(),
-                category: "Clothing".to_string(),
-                quantity: 5,
-            }],
+            items: vec![
+                SavedItem {
+                    name: "T-Shirt".to_string(),
+                    category: "Clothing".to_string(),
+                    quantity: None,
+                    auto_quantity: true,
+                },
+                SavedItem {
+                    name: "Toothbrush".to_string(),
+                    category: "Toiletries".to_string(),
+                    quantity: Some(1),
+                    auto_quantity: false,
+                },
+            ],
             weekdays: 10,
             travel_style: "luxury".to_string(),
             weather: "snowy".to_string(),
             selected_activities: vec!["skiing".to_string()],
             modifiers: ModifiersConfig::default(),
+            last_trip_file: Some("my-trip.yaml".to_string()),
         };
         let yaml = serde_yaml::to_string(&config).unwrap();
         let parsed: AppConfig = serde_yaml::from_str(&yaml).unwrap();
@@ -152,19 +187,78 @@ mod tests {
         assert_eq!(parsed.travel_style, "luxury");
         assert_eq!(parsed.weather, "snowy");
         assert_eq!(parsed.selected_activities, vec!["skiing".to_string()]);
-        assert_eq!(parsed.items[0].quantity, 5);
+        assert_eq!(parsed.last_trip_file.as_deref(), Some("my-trip.yaml"));
+        // Auto items do not persist a quantity
+        assert_eq!(parsed.items[0].quantity, None);
+        assert!(parsed.items[0].auto_quantity);
+        // Fixed items keep their quantity
+        assert_eq!(parsed.items[1].quantity, Some(1));
+        assert!(!parsed.items[1].auto_quantity);
         assert_eq!(
             parsed.modifiers.travel_style_multiplier("luxury"),
             Some(1.5)
         );
     }
-}
 
-#[derive(Debug, Serialize, Deserialize)]
-struct SavedItem {
-    name: String,
-    category: String,
-    quantity: u32,
+    #[test]
+    fn auto_quantities_are_not_persisted() {
+        // The serialized config must not persist a quantity value for auto
+        // items (only the auto_quantity flag may appear)
+        let config = AppConfig {
+            categories: vec![],
+            items: vec![SavedItem {
+                name: "T-Shirt".to_string(),
+                category: "Clothing".to_string(),
+                quantity: None,
+                auto_quantity: true,
+            }],
+            weekdays: 7,
+            travel_style: "standard".to_string(),
+            weather: "mixed".to_string(),
+            selected_activities: vec![],
+            modifiers: ModifiersConfig::default(),
+            last_trip_file: None,
+        };
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        // No "quantity: <n>" line for the auto item
+        assert!(!yaml.lines().any(|l| l.trim_start().starts_with("quantity:")));
+        assert!(yaml.contains("auto_quantity: true"));
+    }
+
+    #[test]
+    fn trip_file_round_trips_and_reconciles() {
+        use crate::config::trip_file::{TripFile, TripItem};
+
+        let mut trip = TripFile {
+            weekdays: 7,
+            travel_style: "standard".to_string(),
+            weather: "cold".to_string(),
+            selected_activities: vec!["hiking".to_string()],
+            items: vec![
+                TripItem { name: "T-Shirt".to_string(), category: "Clothing".to_string(), packed: true },
+                TripItem { name: "Old Item".to_string(), category: "Gone".to_string(), packed: false },
+            ],
+        };
+
+        // Reconcile against a config where "Old Item" no longer exists
+        let config_items = vec![
+            ("T-Shirt".to_string(), "Clothing".to_string()),
+            ("Socks".to_string(), "Clothing".to_string()),
+        ];
+        trip.reconcile(&config_items);
+
+        // Dropped item that is gone from the config, kept the rest
+        assert_eq!(trip.items.len(), 1);
+        assert_eq!(trip.items[0].name, "T-Shirt");
+        assert!(trip.items[0].packed);
+
+        // Round trip through YAML
+        let yaml = serde_yaml::to_string(&trip).unwrap();
+        let parsed: TripFile = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed.weekdays, 7);
+        assert_eq!(parsed.items.len(), 1);
+        assert!(parsed.items[0].packed);
+    }
 }
 
 // State for drawing (cloneable)
@@ -185,6 +279,69 @@ struct AppDrawState {
     left_scroll: usize,
     right_scroll: usize,
     activity_cursor: usize,
+    /// File name of the packing list to persist (without directory)
+    trip_file_name: String,
+    /// Text input for the trip file name on the welcome screen
+    trip_file_input: String,
+    /// Whether the trip file name is being edited
+    editing_trip_file: bool,
+    /// Config screen state
+    config_section: ConfigSection,
+    config_cursor: usize,
+    config_scroll: usize,
+    /// Editor for adding/editing a modifier on the config screen
+    modifier_editor: Option<ModifierEditor>,
+}
+
+/// Sections of the config screen
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ConfigSection {
+    TravelStyles,
+    Weather,
+    Activities,
+}
+
+impl ConfigSection {
+    fn title(&self) -> &'static str {
+        match self {
+            ConfigSection::TravelStyles => "Travel Styles",
+            ConfigSection::Weather => "Weather",
+            ConfigSection::Activities => "Activities",
+        }
+    }
+
+    fn next(&self) -> Self {
+        match self {
+            ConfigSection::TravelStyles => ConfigSection::Weather,
+            ConfigSection::Weather => ConfigSection::Activities,
+            ConfigSection::Activities => ConfigSection::TravelStyles,
+        }
+    }
+
+    fn prev(&self) -> Self {
+        match self {
+            ConfigSection::TravelStyles => ConfigSection::Activities,
+            ConfigSection::Weather => ConfigSection::TravelStyles,
+            ConfigSection::Activities => ConfigSection::Weather,
+        }
+    }
+}
+
+/// In-progress modifier being added or edited on the config screen
+#[derive(Debug, Clone)]
+struct ModifierEditor {
+    /// Index into the section's list; None when adding a new modifier
+    index: Option<usize>,
+    section: ConfigSection,
+    name: String,
+    multiplier: String,
+    field: ModifierField,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum ModifierField {
+    Name,
+    Multiplier,
 }
 
 // A navigable row of a panel: a category header or an item
@@ -247,10 +404,12 @@ pub struct App {
     draw_state: AppDrawState,
     quantity_calculation: QuantityCalculation,
     config_path: PathBuf,
+    /// Directory trip files are persisted to
+    trips_dir: PathBuf,
 }
 
 impl App {
-    pub fn new() -> Result<Self> {
+    pub fn new(trip_file_arg: Option<String>) -> Result<Self> {
         // Initialize terminal
         enable_raw_mode()
             .context("Failed to enable raw mode")?;
@@ -266,23 +425,63 @@ impl App {
         let config_path = dirs::config_dir()
             .context("Could not get config directory")?
             .join("pack-liste");
-        
+
         let config_file = config_path.join("config.yaml");
-        
+        let trips_dir = config_path.join("trips");
+
         // Load or create default config
-        let (packing_list, trip_params) = if config_file.exists() {
+        let (mut packing_list, trip_params) = if config_file.exists() {
             load_config(&config_file)?
         } else {
             create_default_config(&config_file)?
         };
 
+        // Resolve the trip file: CLI arg wins, else the name saved in the config
+        let trip_file_name = trip_file_arg
+            .or_else(|| trip_params.last_trip_file.clone())
+            .unwrap_or_default();
+
+        // Trip parameters, possibly overridden by a loaded trip file
+        let mut weekdays = trip_params.weekdays;
+        let mut travel_style = trip_params.travel_style;
+        let mut weather = trip_params.weather;
+        let mut selected_activities = trip_params.selected_activities;
+
+        // Load and reconcile the trip file if it exists
+        if !trip_file_name.is_empty() {
+            let trip_path = trips_dir.join(&trip_file_name);
+            if let Some(mut trip) = TripFile::load(&trip_path)? {
+                // Reconcile selected items against the current input config
+                let config_items: Vec<(String, String)> = packing_list.items.iter()
+                    .map(|item| (item.name.clone(), item.category.clone()))
+                    .collect();
+                trip.reconcile(&config_items);
+
+                // Restore trip parameters from the trip file
+                weekdays = Weekdays::new(trip.weekdays).unwrap_or(weekdays);
+                travel_style = trip.travel_style;
+                weather = trip.weather;
+                selected_activities = trip.selected_activities;
+
+                // Restore selection and packed state
+                for item in &mut packing_list.items {
+                    if let Some(t) = trip.items.iter()
+                        .find(|t| t.name.eq_ignore_ascii_case(&item.name))
+                    {
+                        item.editable = true;
+                        item.packed = t.packed;
+                    }
+                }
+            }
+        }
+
         let draw_state = AppDrawState {
             screen: Screen::Welcome,
-            packing_list: packing_list.clone(),
-            weekdays: trip_params.weekdays,
-            travel_style: trip_params.travel_style,
-            weather: trip_params.weather,
-            selected_activities: trip_params.selected_activities,
+            packing_list,
+            weekdays,
+            travel_style,
+            weather,
+            selected_activities,
             modifiers: trip_params.modifiers,
             focus: Focus::Weekdays,
             collapsed_categories: Vec::new(),
@@ -292,6 +491,13 @@ impl App {
             left_scroll: 0,
             right_scroll: 0,
             activity_cursor: 0,
+            trip_file_name,
+            trip_file_input: String::new(),
+            editing_trip_file: false,
+            config_section: ConfigSection::TravelStyles,
+            config_cursor: 0,
+            config_scroll: 0,
+            modifier_editor: None,
         };
 
         let mut app = Self {
@@ -300,6 +506,7 @@ impl App {
             draw_state,
             quantity_calculation: QuantityCalculation::new(),
             config_path: config_file,
+            trips_dir,
         };
 
         // Initialize quantities
@@ -312,10 +519,14 @@ impl App {
         let config = AppConfig {
             categories: self.get_unique_categories(),
             items: self.draw_state.packing_list.items.iter()
-                .map(|item| SavedItem {
-                    name: item.name.clone(),
-                    category: item.category.clone(),
-                    quantity: item.quantity,
+                .map(|item| {
+                    let auto = item.auto_quantity;
+                    SavedItem {
+                        name: item.name.clone(),
+                        category: item.category.clone(),
+                        quantity: if auto { None } else { Some(item.quantity) },
+                        auto_quantity: auto,
+                    }
                 })
                 .collect(),
             weekdays: self.draw_state.weekdays.get(),
@@ -323,21 +534,51 @@ impl App {
             weather: self.draw_state.weather.clone(),
             selected_activities: self.draw_state.selected_activities.clone(),
             modifiers: self.draw_state.modifiers.clone(),
+            last_trip_file: if self.draw_state.trip_file_name.is_empty() {
+                None
+            } else {
+                Some(self.draw_state.trip_file_name.clone())
+            },
         };
-        
+
         let yaml = serde_yaml::to_string(&config)
             .context("Failed to serialize config")?;
-        
+
         // Ensure config directory exists
         if let Some(parent) = self.config_path.parent() {
             fs::create_dir_all(parent)
                 .context("Failed to create config directory")?;
         }
-        
+
         fs::write(&self.config_path, yaml)
             .context("Failed to write config file")?;
-        
+
         Ok(())
+    }
+
+    /// Persist the compiled packing list to the trip file, in place.
+    /// Quantities are not persisted; they are recalculated on load.
+    fn save_trip_file(&self) -> Result<()> {
+        if self.draw_state.trip_file_name.is_empty() {
+            return Ok(());
+        }
+
+        let trip = TripFile {
+            weekdays: self.draw_state.weekdays.get(),
+            travel_style: self.draw_state.travel_style.clone(),
+            weather: self.draw_state.weather.clone(),
+            selected_activities: self.draw_state.selected_activities.clone(),
+            items: self.draw_state.packing_list.items.iter()
+                .filter(|item| item.editable)
+                .map(|item| TripItem {
+                    name: item.name.clone(),
+                    category: item.category.clone(),
+                    packed: item.packed,
+                })
+                .collect(),
+        };
+
+        trip.save(&self.trips_dir.join(&self.draw_state.trip_file_name))
     }
 
     fn get_unique_categories(&self) -> Vec<String> {
@@ -413,9 +654,19 @@ impl App {
             .filter_map(|name| self.draw_state.modifiers.activity_multiplier(name))
             .collect();
 
+        let item_specs: Vec<ItemQuantitySpec> = self.draw_state.packing_list.items.iter()
+            .map(|item| {
+                if item.auto_quantity {
+                    ItemQuantitySpec::Auto
+                } else {
+                    ItemQuantitySpec::Fixed(item.quantity)
+                }
+            })
+            .collect();
+
         let input = QuantityCalculationInput {
             weekdays: self.draw_state.weekdays,
-            item_count: self.draw_state.packing_list.items.len(),
+            item_specs,
             travel_style: self.draw_state.travel_style.clone(),
             travel_style_multiplier: style_multiplier,
             weather: self.draw_state.weather.clone(),
@@ -446,8 +697,9 @@ impl App {
                     }
                 }
                 AppState::Exit => {
-                    // Save config before exiting
+                    // Save config and trip file before exiting
                     self.save_config()?;
+                    self.save_trip_file()?;
                     break;
                 }
             }
@@ -485,6 +737,9 @@ impl App {
                 Screen::Help => {
                     draw_help_screen(f, size);
                 }
+                Screen::Config => {
+                    draw_config_screen(f, size, &state);
+                }
             }
         })?;
 
@@ -513,6 +768,17 @@ impl App {
                         }
                         return Ok(false);
                     }
+
+                    // Left/Right collapse/expand the group under the cursor
+                    if self.draw_state.screen == Screen::Main
+                        && matches!(self.draw_state.input_mode, InputMode::Normal)
+                        && self.draw_state.focus_side == FocusSide::Left
+                        && matches!(key.code, KeyCode::Left | KeyCode::Right)
+                    {
+                        let collapse = key.code == KeyCode::Left;
+                        self.set_category_collapsed(collapse);
+                        return Ok(false);
+                    }
                     
                     // Route text input to the add/edit popups
                     if self.draw_state.screen == Screen::Main
@@ -520,6 +786,35 @@ impl App {
                         && matches!(key.code, KeyCode::Char(_) | KeyCode::Backspace)
                     {
                         self.handle_add_edit_input(key);
+                        return Ok(false);
+                    }
+
+                    // The config screen handles all its own keys
+                    if self.draw_state.screen == Screen::Config {
+                        return self.handle_config_screen_input(key);
+                    }
+
+                    // Trip file name editing on the welcome screen
+                    if self.draw_state.screen == Screen::Welcome && self.draw_state.editing_trip_file {
+                        match key.code {
+                            KeyCode::Enter => {
+                                let name = self.draw_state.trip_file_input.trim().to_string();
+                                if !name.is_empty() {
+                                    self.draw_state.trip_file_name = name;
+                                }
+                                self.draw_state.editing_trip_file = false;
+                            }
+                            KeyCode::Esc => {
+                                self.draw_state.editing_trip_file = false;
+                            }
+                            KeyCode::Backspace => {
+                                self.draw_state.trip_file_input.pop();
+                            }
+                            KeyCode::Char(c) => {
+                                self.draw_state.trip_file_input.push(c);
+                            }
+                            _ => {}
+                        }
                         return Ok(false);
                     }
 
@@ -532,6 +827,14 @@ impl App {
                                 }
                                 Screen::Help => {
                                     self.draw_state.screen = Screen::Main;
+                                }
+                                Screen::Config => {
+                                    // Cancel the modifier editor, else leave the config screen
+                                    if self.draw_state.modifier_editor.is_some() {
+                                        self.draw_state.modifier_editor = None;
+                                    } else {
+                                        self.draw_state.screen = Screen::Welcome;
+                                    }
                                 }
                                 Screen::Main => {
                                     match self.draw_state.input_mode {
@@ -567,6 +870,7 @@ impl App {
                                 Screen::Help => {
                                     self.draw_state.screen = Screen::Main;
                                 }
+                                Screen::Config => {}
                                 Screen::Main => {
                                     match &self.draw_state.input_mode {
                                         InputMode::Normal => {
@@ -736,6 +1040,19 @@ impl App {
                         KeyCode::Down => {
                             self.handle_down()?;
                         }
+                        KeyCode::Char('f') | KeyCode::Char('F') => {
+                            if self.draw_state.screen == Screen::Welcome {
+                                // Edit the trip file name
+                                self.draw_state.trip_file_input = self.draw_state.trip_file_name.clone();
+                                self.draw_state.editing_trip_file = true;
+                            }
+                        }
+                        KeyCode::Char('o') | KeyCode::Char('O') => {
+                            if self.draw_state.screen == Screen::Welcome {
+                                // Open the config screen
+                                self.draw_state.screen = Screen::Config;
+                            }
+                        }
                         KeyCode::Char('+') => {
                             if self.draw_state.screen == Screen::Welcome && self.draw_state.focus == Focus::Weekdays {
                                 if let Ok(new_weekdays) = Weekdays::new(self.draw_state.weekdays.get() + 1) {
@@ -792,6 +1109,7 @@ impl App {
                     }
                 }
             }
+            Screen::Config => {}
             Screen::Main => {
                 if matches!(self.draw_state.input_mode, InputMode::Normal) {
                     // Navigate up through the visible rows of the focused side
@@ -845,6 +1163,7 @@ impl App {
                     }
                 }
             }
+            Screen::Config => {}
             Screen::Main => {
                 if matches!(self.draw_state.input_mode, InputMode::Normal) {
                     // Navigate down through the visible rows of the focused side
@@ -869,6 +1188,163 @@ impl App {
             Screen::Help => {}
         }
         Ok(())
+    }
+
+    // The modifiers of the focused config section
+    fn config_section_modifiers(&self, section: ConfigSection) -> &Vec<crate::config::modifiers::ModifierConfig> {
+        match section {
+            ConfigSection::TravelStyles => &self.draw_state.modifiers.travel_styles,
+            ConfigSection::Weather => &self.draw_state.modifiers.weather,
+            ConfigSection::Activities => &self.draw_state.modifiers.activities,
+        }
+    }
+
+    fn config_section_modifiers_mut(&mut self, section: ConfigSection) -> &mut Vec<crate::config::modifiers::ModifierConfig> {
+        match section {
+            ConfigSection::TravelStyles => &mut self.draw_state.modifiers.travel_styles,
+            ConfigSection::Weather => &mut self.draw_state.modifiers.weather,
+            ConfigSection::Activities => &mut self.draw_state.modifiers.activities,
+        }
+    }
+
+    fn handle_config_screen_input(&mut self, key: event::KeyEvent) -> Result<bool> {
+        // Modifier editor is open: route all keys to it
+        if let Some(editor) = self.draw_state.modifier_editor.as_mut() {
+            match key.code {
+                KeyCode::Esc => {
+                    self.draw_state.modifier_editor = None;
+                }
+                KeyCode::Tab | KeyCode::BackTab => {
+                    editor.field = match editor.field {
+                        ModifierField::Name => ModifierField::Multiplier,
+                        ModifierField::Multiplier => ModifierField::Name,
+                    };
+                }
+                KeyCode::Enter => {
+                    // Save the modifier
+                    let editor = self.draw_state.modifier_editor.take().unwrap();
+                    let name = editor.name.trim().to_string();
+                    let multiplier: f32 = editor.multiplier.trim().parse().unwrap_or(1.0);
+                    if !name.is_empty() {
+                        let list = self.config_section_modifiers_mut(editor.section);
+                        match editor.index {
+                            Some(i) if i < list.len() => {
+                                list[i].name = name;
+                                list[i].multiplier = multiplier;
+                            }
+                            _ => {
+                                list.push(crate::config::modifiers::ModifierConfig {
+                                    name,
+                                    multiplier,
+                                });
+                            }
+                        }
+                        // Keep the current selections valid
+                        self.reconcile_selections();
+                        self.save_config().ok();
+                        self.update_quantities()?;
+                    }
+                }
+                KeyCode::Backspace => {
+                    match editor.field {
+                        ModifierField::Name => { editor.name.pop(); }
+                        ModifierField::Multiplier => { editor.multiplier.pop(); }
+                    }
+                }
+                KeyCode::Char(c) => {
+                    match editor.field {
+                        ModifierField::Name => { editor.name.push(c); }
+                        ModifierField::Multiplier => { editor.multiplier.push(c); }
+                    }
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
+
+        match key.code {
+            KeyCode::Tab => {
+                self.draw_state.config_section = self.draw_state.config_section.next();
+                self.draw_state.config_cursor = 0;
+                self.draw_state.config_scroll = 0;
+            }
+            KeyCode::BackTab => {
+                self.draw_state.config_section = self.draw_state.config_section.prev();
+                self.draw_state.config_cursor = 0;
+                self.draw_state.config_scroll = 0;
+            }
+            KeyCode::Up => {
+                if self.draw_state.config_cursor > 0 {
+                    self.draw_state.config_cursor -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let count = self.config_section_modifiers(self.draw_state.config_section).len();
+                if self.draw_state.config_cursor + 1 < count {
+                    self.draw_state.config_cursor += 1;
+                }
+            }
+            KeyCode::Char('a') | KeyCode::Char('A') => {
+                // Add a new modifier to the focused section
+                self.draw_state.modifier_editor = Some(ModifierEditor {
+                    index: None,
+                    section: self.draw_state.config_section,
+                    name: String::new(),
+                    multiplier: String::from("1.0"),
+                    field: ModifierField::Name,
+                });
+            }
+            KeyCode::Char('e') | KeyCode::Char('E') => {
+                // Edit the modifier under the cursor
+                let section = self.draw_state.config_section;
+                let cursor = self.draw_state.config_cursor;
+                if let Some(m) = self.config_section_modifiers(section).get(cursor) {
+                    self.draw_state.modifier_editor = Some(ModifierEditor {
+                        index: Some(cursor),
+                        section,
+                        name: m.name.clone(),
+                        multiplier: m.multiplier.to_string(),
+                        field: ModifierField::Name,
+                    });
+                }
+            }
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                // Delete the modifier under the cursor
+                let section = self.draw_state.config_section;
+                let cursor = self.draw_state.config_cursor;
+                let list = self.config_section_modifiers_mut(section);
+                if cursor < list.len() {
+                    list.remove(cursor);
+                    let count = list.len();
+                    if self.draw_state.config_cursor >= count {
+                        self.draw_state.config_cursor = count.saturating_sub(1);
+                    }
+                    self.reconcile_selections();
+                    self.save_config().ok();
+                    self.update_quantities()?;
+                }
+            }
+            _ => {}
+        }
+        Ok(false)
+    }
+
+    /// Keep the current travel style / weather / activity selections valid
+    /// after modifiers change
+    fn reconcile_selections(&mut self) {
+        if self.draw_state.modifiers.travel_style_multiplier(&self.draw_state.travel_style).is_none() {
+            self.draw_state.travel_style = self.draw_state.modifiers.travel_styles.first()
+                .map(|m| m.name.clone())
+                .unwrap_or_default();
+        }
+        if self.draw_state.modifiers.weather_multiplier(&self.draw_state.weather).is_none() {
+            self.draw_state.weather = self.draw_state.modifiers.weather.first()
+                .map(|m| m.name.clone())
+                .unwrap_or_default();
+        }
+        self.draw_state.selected_activities.retain(|name| {
+            self.draw_state.modifiers.activity_multiplier(name).is_some()
+        });
     }
 
     fn handle_add_edit_input(&mut self, key: event::KeyEvent) {
@@ -924,24 +1400,44 @@ impl App {
         }
     }
 
-    fn toggle_category_collapse(&mut self) {
-        // Toggle collapse of the category the cursor is on (header or one of its items)
-        let category = {
-            let rows = self.draw_state.active_rows();
-            match rows.get(self.draw_state.selected_index) {
-                Some(PanelRow::Category(c)) => Some(c.clone()),
-                Some(PanelRow::Item(index)) => Some(self.draw_state.packing_list.items[*index].category.clone()),
-                None => None,
-            }
+    // The category the cursor is on (header row or one of its items)
+    fn current_category(&self) -> Option<String> {
+        let rows = self.draw_state.active_rows();
+        match rows.get(self.draw_state.selected_index) {
+            Some(PanelRow::Category(c)) => Some(c.clone()),
+            Some(PanelRow::Item(index)) => Some(self.draw_state.packing_list.items[*index].category.clone()),
+            None => None,
+        }
+    }
+
+    // Collapse (true) or expand (false) the category under the cursor.
+    // When collapsing, the cursor moves to the category's header row so it
+    // stays visible.
+    fn set_category_collapsed(&mut self, collapsed: bool) {
+        let Some(category) = self.current_category() else {
+            return;
         };
 
-        if let Some(category) = category {
-            if self.draw_state.collapsed_categories.contains(&category) {
-                self.draw_state.collapsed_categories.retain(|c| c != &category);
-            } else {
+        if collapsed {
+            if !self.draw_state.collapsed_categories.contains(&category) {
                 self.draw_state.collapsed_categories.push(category);
             }
+            // Move the cursor to the category's header row
+            let rows = self.draw_state.active_rows();
+            if let Some(row) = rows.iter().position(|r| matches!(r, PanelRow::Category(c) if *c == category)) {
+                self.draw_state.selected_index = row;
+            }
+        } else {
+            self.draw_state.collapsed_categories.retain(|c| c != &category);
         }
+    }
+
+    fn toggle_category_collapse(&mut self) {
+        // Toggle collapse of the category the cursor is on
+        let collapsed = self.current_category()
+            .map(|c| self.draw_state.collapsed_categories.contains(&c))
+            .unwrap_or(false);
+        self.set_category_collapsed(!collapsed);
     }
 
     fn toggle_item_selection(&mut self) {
@@ -953,21 +1449,25 @@ impl App {
     }
 
     fn toggle_category_selection(&mut self) {
-        // Toggle selection of all items in the current category
-        let category = match self.draw_state.active_rows().get(self.draw_state.selected_index) {
-            Some(PanelRow::Category(c)) => Some(c.clone()),
-            Some(PanelRow::Item(index)) => Some(self.draw_state.packing_list.items[*index].category.clone()),
-            None => None,
+        // Toggle selection of all items in the current category, then
+        // collapse the group when items were added to the trip and expand
+        // it when they were removed
+        let Some(category) = self.current_category() else {
+            return;
         };
 
-        if let Some(category) = category {
-            // Toggle all items in this category
-            for item in &mut self.draw_state.packing_list.items {
-                if item.category == category {
-                    item.editable = !item.editable;
-                }
+        let was_selected = self.draw_state.packing_list.items.iter()
+            .any(|item| item.category == category && item.editable);
+
+        for item in &mut self.draw_state.packing_list.items {
+            if item.category == category {
+                item.editable = !item.editable;
             }
         }
+
+        // Follow the selection state: added -> collapse, removed -> expand
+        let now_selected = !was_selected;
+        self.set_category_collapsed(!now_selected);
     }
 
     fn toggle_item_packed_right_side(&mut self) {
@@ -1072,6 +1572,7 @@ struct TripParams {
     weather: String,
     selected_activities: Vec<String>,
     modifiers: ModifiersConfig,
+    last_trip_file: Option<String>,
 }
 
 fn load_config(config_file: &PathBuf) -> Result<(PackingList, TripParams)> {
@@ -1086,12 +1587,16 @@ fn load_config(config_file: &PathBuf) -> Result<(PackingList, TripParams)> {
 
     for saved_item in config.items {
         let new_id = format!("item_{}", packing_list.items.len() + 1);
-        packing_list.add_item(Item::new(
+        let auto = saved_item.auto_quantity;
+        let fixed_quantity = if auto { 1 } else { saved_item.quantity.unwrap_or(1) };
+        let mut item = Item::new(
             new_id,
             saved_item.name,
             saved_item.category,
-            saved_item.quantity,
-        ));
+            fixed_quantity,
+        );
+        item.auto_quantity = auto;
+        packing_list.add_item(item);
     }
 
     let weekdays = Weekdays::new(config.weekdays).unwrap_or_default();
@@ -1101,6 +1606,7 @@ fn load_config(config_file: &PathBuf) -> Result<(PackingList, TripParams)> {
         weather: config.weather,
         selected_activities: config.selected_activities,
         modifiers: config.modifiers,
+        last_trip_file: config.last_trip_file,
     };
 
     Ok((packing_list, trip_params))
@@ -1146,6 +1652,7 @@ fn create_default_config(config_file: &PathBuf) -> Result<(PackingList, TripPara
         weather: default_weather_name(),
         selected_activities: Vec::new(),
         modifiers: ModifiersConfig::default(),
+        last_trip_file: None,
     };
 
     // Save config
@@ -1160,10 +1667,14 @@ fn create_default_config(config_file: &PathBuf) -> Result<(PackingList, TripPara
             "Miscellaneous".to_string(),
         ],
         items: packing_list.items.iter()
-            .map(|item| SavedItem {
-                name: item.name.clone(),
-                category: item.category.clone(),
-                quantity: item.quantity,
+            .map(|item| {
+                let auto = item.auto_quantity;
+                SavedItem {
+                    name: item.name.clone(),
+                    category: item.category.clone(),
+                    quantity: if auto { None } else { Some(item.quantity) },
+                    auto_quantity: auto,
+                }
             })
             .collect(),
         weekdays: trip_params.weekdays.get(),
@@ -1171,6 +1682,7 @@ fn create_default_config(config_file: &PathBuf) -> Result<(PackingList, TripPara
         weather: trip_params.weather.clone(),
         selected_activities: trip_params.selected_activities.clone(),
         modifiers: trip_params.modifiers.clone(),
+        last_trip_file: None,
     };
 
     let yaml = serde_yaml::to_string(&config)
@@ -1211,6 +1723,7 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
         .direction(Direction::Vertical)
         .margin(0)
         .constraints([
+            Constraint::Length(4),
             Constraint::Length(4),
             Constraint::Length(4),
             Constraint::Length(4),
@@ -1278,6 +1791,40 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
     f.render_widget(weather_block, params_layout[2]);
     f.render_widget(weather_para, params_layout[2]);
 
+    // Trip file name (persist target for the compiled packing list)
+    let file_block = Block::default()
+        .title("Packing List File")
+        .borders(Borders::ALL)
+        .border_style(if state.editing_trip_file {
+            Style::new().fg(Color::Yellow)
+        } else {
+            Style::new()
+        });
+
+    let file_text = if state.editing_trip_file {
+        vec![
+            Line::from(""),
+            Line::from(format!("  Name: {}_", state.trip_file_input)),
+            Line::from(""),
+            Line::from("  Enter to confirm | Esc to cancel".dim()),
+        ]
+    } else {
+        let shown = if state.trip_file_name.is_empty() {
+            "(none - set a name to persist your packing list)".dim()
+        } else {
+            state.trip_file_name.clone().into()
+        };
+        vec![
+            Line::from(""),
+            Line::from(vec![Span::raw("  File: "), shown]),
+            Line::from(""),
+            Line::from("  Press F to edit (saved under ~/.config/pack-liste/trips/)".dim()),
+        ]
+    };
+    let file_para = Paragraph::new(file_text);
+    f.render_widget(file_block, params_layout[3]);
+    f.render_widget(file_para, params_layout[3]);
+
     // Activities (multi-select, scrollable)
     let activities_block = Block::default()
         .title("Activities")
@@ -1288,7 +1835,7 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
             Style::new()
         });
 
-    let activities_area = params_layout[3];
+    let activities_area = params_layout[4];
     let activities_inner = Rect {
         x: activities_area.x + 1,
         y: activities_area.y + 1,
@@ -1401,12 +1948,33 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
             Span::raw(" - Toggle activity (in Activities section)"),
         ]),
         Line::from(vec![
+            Span::raw("F").bold().fg(Color::Yellow),
+            Span::raw(" - Edit packing list file name"),
+        ]),
+        Line::from(vec![
+            Span::raw("O").bold().fg(Color::Yellow),
+            Span::raw(" - Open configuration (modifiers)"),
+        ]),
+        Line::from(vec![
             Span::raw("Tab").bold().fg(Color::Yellow),
             Span::raw(" - Navigate between fields"),
         ]),
         Line::from(vec![
             Span::raw("Enter").bold().fg(Color::Yellow),
             Span::raw(" - Continue to main screen"),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("CONFIG SCREEN:").bold().fg(Color::Yellow),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::raw("Tab").bold().fg(Color::Yellow),
+            Span::raw(" - Switch section (styles/weather/activities)"),
+        ]),
+        Line::from(vec![
+            Span::raw("A/E/D").bold().fg(Color::Yellow),
+            Span::raw(" - Add / Edit / Delete modifier"),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -1501,6 +2069,167 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
     let help_para = Paragraph::new(help_text)
         .wrap(Wrap { trim: true });
     f.render_widget(help_para, inner);
+}
+
+fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDrawState) {
+    let [title_area, content_area, instructions_area] = *Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(3),
+        ])
+        .split(size) else {
+        return;
+    };
+
+    // Title
+    let title = Paragraph::new("Configuration - Modifiers")
+        .style(Style::new().bold().fg(Color::Green));
+    f.render_widget(title, title_area);
+
+    // Modifier editor popup takes precedence
+    if let Some(editor) = &state.modifier_editor {
+        let popup_width = 50.min(size.width.saturating_sub(4));
+        let popup_area = Rect {
+            x: size.x + (size.width.saturating_sub(popup_width)) / 2,
+            y: size.y + 5,
+            width: popup_width,
+            height: 7,
+        };
+
+        let block = Block::default()
+            .title(if editor.index.is_some() { "Edit Modifier" } else { "Add Modifier" })
+            .borders(Borders::ALL)
+            .style(Style::new().bg(Color::Black).fg(Color::White));
+        f.render_widget(block, popup_area);
+
+        let inner = Rect {
+            x: popup_area.x + 1,
+            y: popup_area.y + 1,
+            width: popup_area.width.saturating_sub(2),
+            height: popup_area.height.saturating_sub(2),
+        };
+
+        let field_style = Style::new().fg(Color::Yellow).bold();
+        let normal_style = Style::new().fg(Color::White);
+        let name_line = Line::from(vec![
+            Span::raw("Name: ").style(if editor.field == ModifierField::Name { field_style } else { normal_style }),
+            Span::raw(&editor.name),
+        ]);
+        let multiplier_line = Line::from(vec![
+            Span::raw("Multiplier: ").style(if editor.field == ModifierField::Multiplier { field_style } else { normal_style }),
+            Span::raw(&editor.multiplier),
+        ]);
+        let hint = Line::from("Tab switch field | Enter save | Esc cancel".dim());
+
+        let para = Paragraph::new(vec![name_line, multiplier_line, hint]);
+        f.render_widget(para, inner);
+        return;
+    }
+
+    // Section tabs
+    let tabs = Line::from(vec![
+        Span::raw(if state.config_section == ConfigSection::TravelStyles { "[Travel Styles]" } else { " Travel Styles " })
+            .style(if state.config_section == ConfigSection::TravelStyles {
+                Style::new().fg(Color::Yellow).bold()
+            } else {
+                Style::new().fg(Color::DarkGray)
+            }),
+        Span::raw(" | "),
+        Span::raw(if state.config_section == ConfigSection::Weather { "[Weather]" } else { " Weather " })
+            .style(if state.config_section == ConfigSection::Weather {
+                Style::new().fg(Color::Yellow).bold()
+            } else {
+                Style::new().fg(Color::DarkGray)
+            }),
+        Span::raw(" | "),
+        Span::raw(if state.config_section == ConfigSection::Activities { "[Activities]" } else { " Activities " })
+            .style(if state.config_section == ConfigSection::Activities {
+                Style::new().fg(Color::Yellow).bold()
+            } else {
+                Style::new().fg(Color::DarkGray)
+            }),
+    ]);
+    f.render_widget(Paragraph::new(tabs), Rect {
+        x: content_area.x,
+        y: content_area.y,
+        width: content_area.width,
+        height: 1,
+    });
+
+    // Modifier list of the focused section
+    let list_area = Rect {
+        x: content_area.x,
+        y: content_area.y + 2,
+        width: content_area.width,
+        height: content_area.height.saturating_sub(2),
+    };
+
+    let modifiers = match state.config_section {
+        ConfigSection::TravelStyles => &state.modifiers.travel_styles,
+        ConfigSection::Weather => &state.modifiers.weather,
+        ConfigSection::Activities => &state.modifiers.activities,
+    };
+
+    // Window the list so the cursor stays visible
+    let viewport_height = list_area.height as usize;
+    let mut scroll = state.config_scroll.min(modifiers.len().saturating_sub(viewport_height));
+    if state.config_cursor >= scroll + viewport_height {
+        scroll = state.config_cursor + 1 - viewport_height;
+    } else if state.config_cursor < scroll {
+        scroll = state.config_cursor;
+    }
+
+    let lines: Vec<Line> = modifiers.iter()
+        .enumerate()
+        .skip(scroll)
+        .take(viewport_height)
+        .map(|(i, m)| {
+            let is_cursor = i == state.config_cursor;
+            let mut line = Line::from(vec![
+                Span::raw("  "),
+                Span::raw(format!("{:<20}", m.name)),
+                Span::raw(format!(" x{:.2}", m.multiplier)),
+            ]);
+            if is_cursor {
+                line = line.style(Style::new().fg(Color::Yellow).bg(Color::DarkGray));
+            }
+            line
+        })
+        .collect();
+
+    let list_block = Block::default()
+        .title(state.config_section.title())
+        .borders(Borders::ALL);
+    f.render_widget(list_block, list_area);
+    f.render_widget(Paragraph::new(lines), Rect {
+        x: list_area.x + 1,
+        y: list_area.y + 1,
+        width: list_area.width.saturating_sub(2),
+        height: list_area.height.saturating_sub(2),
+    });
+
+    // Instructions
+    let instructions = Paragraph::new(vec![
+        Line::from(vec![
+            Span::raw("Tab").bold().fg(Color::Yellow),
+            Span::raw(" Switch section | "),
+            Span::raw("↑/↓").bold().fg(Color::Yellow),
+            Span::raw(" Move | "),
+            Span::raw("A").bold().fg(Color::Yellow),
+            Span::raw(" Add | "),
+            Span::raw("E").bold().fg(Color::Yellow),
+            Span::raw(" Edit | "),
+            Span::raw("D").bold().fg(Color::Yellow),
+            Span::raw(" Delete | "),
+            Span::raw("Esc").bold().fg(Color::Red),
+            Span::raw(" Back"),
+        ]),
+    ])
+    .wrap(Wrap { trim: true });
+    f.render_widget(instructions, instructions_area);
 }
 
 fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut AppDrawState) {

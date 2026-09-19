@@ -1,12 +1,12 @@
 use anyhow::Result;
 use std::io::{self, IsTerminal};
 
-pub fn run(force_tui: bool) -> Result<()> {
+pub fn run(force_tui: bool, trip_file: Option<String>) -> Result<()> {
     // Check if we're in a terminal or force TUI mode
     if io::stdout().is_terminal() || force_tui {
         // Run TUI mode
         use crate::ui::app::App;
-        let mut app = App::new()?;
+        let mut app = App::new(trip_file)?;
         app.run()?;
     } else {
         // Non-interactive mode

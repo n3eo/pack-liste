@@ -17,10 +17,14 @@ struct Args {
     /// Enable debug logging
     #[arg(short, long)]
     debug: bool,
-    
+
     /// Force TUI mode (even in non-interactive environments)
     #[arg(long)]
     force_tui: bool,
+
+    /// Packing list file to continue (saved under ~/.config/pack-liste/trips/)
+    #[arg(short, long)]
+    file: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -38,7 +42,7 @@ fn main() -> Result<()> {
     }
 
     // Run the application
-    if let Err(e) = app::run(args.force_tui) {
+    if let Err(e) = app::run(args.force_tui, args.file) {
         eprintln!("Application error: {}", e);
         anyhow::bail!(e);
     }

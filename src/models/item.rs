@@ -9,6 +9,9 @@ pub struct Item {
     pub quantity: u32,
     pub packed: bool,
     pub editable: bool,
+    /// When false, the quantity is fixed and not recalculated from
+    /// trip parameters (e.g. a toothbrush always stays at 1)
+    pub auto_quantity: bool,
 }
 
 impl Item {
@@ -26,6 +29,7 @@ impl Item {
             quantity: base_quantity,
             packed: false,
             editable: true,
+            auto_quantity: true,
         }
     }
 

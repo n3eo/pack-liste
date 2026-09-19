@@ -2,6 +2,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::models::weekdays::Weekdays;
 
+/// How the quantity of one item is determined.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum ItemQuantitySpec {
+    /// Recalculated from trip parameters on every change
+    Auto,
+    /// Fixed quantity, never recalculated (e.g. toothbrush)
+    Fixed(u32),
+}
+
 /// Input for the quantity calculation.
 ///
 /// The modifier names are carried for documentation purposes; the multipliers
@@ -9,7 +18,7 @@ use crate::models::weekdays::Weekdays;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuantityCalculationInput {
     pub weekdays: Weekdays,
-    pub item_count: usize,
+    pub item_specs: Vec<ItemQuantitySpec>,
     pub travel_style: String,
     pub travel_style_multiplier: f32,
     pub weather: String,
