@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::Parser;
 
-mod app;
-mod config;
-mod models;
-mod quantity;
-mod ui;
+pub(crate) mod app;
+pub(crate) mod config;
+pub(crate) mod models;
+pub(crate) mod quantity;
+pub(crate) mod ui;
 
 #[derive(Parser, Debug)]
 #[command(name = "pack-liste")]
@@ -13,10 +13,6 @@ mod ui;
 #[command(version = "0.1.0")]
 #[command(about = "A terminal-based packing list application with dynamic quantity calculation")]
 struct Args {
-    /// Enable debug logging
-    #[arg(short, long)]
-    debug: bool,
-
     /// Force TUI mode (even in non-interactive environments)
     #[arg(long)]
     force_tui: bool,
@@ -29,22 +25,7 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
 
-    // Initialize logging
-    if args.debug {
-        tracing_subscriber::fmt()
-            .with_env_filter("pack_liste=debug")
-            .init();
-    } else {
-        tracing_subscriber::fmt()
-            .with_env_filter("pack_liste=info")
-            .init();
-    }
-
-    // Run the application
-    if let Err(e) = app::run(args.force_tui, args.file) {
-        eprintln!("Application error: {}", e);
-        anyhow::bail!(e);
-    }
-
-    Ok(())
+    // Run the application; the returned error is reported once by
+    // the Result returned from main
+    app::run(args.force_tui, args.file)
 }

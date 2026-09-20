@@ -3,20 +3,20 @@ use serde::{Deserialize, Serialize};
 /// A named multiplier used by the quantity calculation, e.g. a travel
 /// style or a weather condition.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModifierConfig {
-    pub name: String,
-    pub multiplier: f32,
+pub(crate) struct ModifierConfig {
+    pub(crate) name: String,
+    pub(crate) multiplier: f32,
 }
 
 /// Configuration of the quantity calculation modifiers, loaded from the
 /// config file. All fields default to the built-in values so older config
 /// files without these sections keep working.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ModifiersConfig {
+pub(crate) struct ModifiersConfig {
     #[serde(default = "default_travel_styles")]
-    pub travel_styles: Vec<ModifierConfig>,
+    pub(crate) travel_styles: Vec<ModifierConfig>,
     #[serde(default = "default_weather")]
-    pub weather: Vec<ModifierConfig>,
+    pub(crate) weather: Vec<ModifierConfig>,
 }
 
 impl Default for ModifiersConfig {
@@ -29,14 +29,14 @@ impl Default for ModifiersConfig {
 }
 
 impl ModifiersConfig {
-    pub fn travel_style_multiplier(&self, name: &str) -> Option<f32> {
+    pub(crate) fn travel_style_multiplier(&self, name: &str) -> Option<f32> {
         self.travel_styles
             .iter()
             .find(|m| m.name == name)
             .map(|m| m.multiplier)
     }
 
-    pub fn weather_multiplier(&self, name: &str) -> Option<f32> {
+    pub(crate) fn weather_multiplier(&self, name: &str) -> Option<f32> {
         self.weather
             .iter()
             .find(|m| m.name == name)

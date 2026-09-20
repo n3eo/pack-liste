@@ -1,3 +1,3 @@
-pub mod item;
-pub mod packing_list;
-pub mod weekdays;
+pub(crate) mod item;
+pub(crate) mod packing_list;
+pub(crate) mod weekdays;

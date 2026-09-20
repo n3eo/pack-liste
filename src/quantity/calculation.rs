@@ -7,14 +7,17 @@ use crate::quantity::model::{
 /// Maximum quantity for any item, per spec 005 EC-003.
 const MAX_QUANTITY: u32 = 20;
 
-pub struct QuantityCalculation;
+pub(crate) struct QuantityCalculation;
 
 impl QuantityCalculation {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self
     }
 
-    pub fn calculate(&self, input: &QuantityCalculationInput) -> Result<QuantityCalculationOutput> {
+    pub(crate) fn calculate(
+        &self,
+        input: &QuantityCalculationInput,
+    ) -> Result<QuantityCalculationOutput> {
         // Base quantity from trip length, capped per spec
         let base = input.weekdays.get().min(MAX_QUANTITY);
 

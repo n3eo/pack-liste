@@ -1,2 +1,2 @@
-pub mod modifiers;
-pub mod trip_file;
+pub(crate) mod modifiers;
+pub(crate) mod trip_file;

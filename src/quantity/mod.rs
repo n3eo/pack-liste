@@ -1,2 +1,2 @@
-pub mod calculation;
-pub mod model;
+pub(crate) mod calculation;
+pub(crate) mod model;

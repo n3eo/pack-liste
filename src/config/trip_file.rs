@@ -10,29 +10,29 @@ use std::path::Path;
 /// continued later. The file is human-readable YAML and can be edited by
 /// hand; on load it is reconciled against the current input config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TripFile {
+pub(crate) struct TripFile {
     /// Trip parameters at the time of the last save
-    pub weekdays: u32,
-    pub travel_style: String,
-    pub weather: String,
+    pub(crate) weekdays: u32,
+    pub(crate) travel_style: String,
+    pub(crate) weather: String,
     /// The compiled packing list: selected items with packed state.
     /// Quantities are not persisted; they are recalculated on load.
     #[serde(default)]
-    pub items: Vec<TripItem>,
+    pub(crate) items: Vec<TripItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct TripItem {
-    pub name: String,
-    pub category: String,
+pub(crate) struct TripItem {
+    pub(crate) name: String,
+    pub(crate) category: String,
     #[serde(default)]
-    pub packed: bool,
+    pub(crate) packed: bool,
 }
 
 impl TripFile {
     /// Load a trip file. Returns None if the file does not exist yet
     /// (a new trip).
-    pub fn load(path: &Path) -> Result<Option<Self>> {
+    pub(crate) fn load(path: &Path) -> Result<Option<Self>> {
         if !path.exists() {
             return Ok(None);
         }
@@ -44,7 +44,7 @@ impl TripFile {
     }
 
     /// Save the trip file in place.
-    pub fn save(&self, path: &Path) -> Result<()> {
+    pub(crate) fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent()
             && !parent.as_os_str().is_empty()
         {
@@ -70,7 +70,7 @@ impl TripFile {
     /// catalog are dropped; surviving items are matched to the catalog
     /// item's primary category. The packed state is preserved for items
     /// that still exist.
-    pub fn reconcile(&mut self, config_items: &[(String, Vec<String>)]) {
+    pub(crate) fn reconcile(&mut self, config_items: &[(String, Vec<String>)]) {
         let find_config_categories = |name: &str, category: &str| -> Option<Vec<String>> {
             // Prefer an exact match on both name and category, fall back
             // to a name-only match

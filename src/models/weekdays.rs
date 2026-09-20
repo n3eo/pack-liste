@@ -2,13 +2,13 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Weekdays(u32);
+pub(crate) struct Weekdays(u32);
 
 impl Weekdays {
-    pub const MIN: u32 = 1;
-    pub const MAX: u32 = 30;
+    pub(crate) const MIN: u32 = 1;
+    pub(crate) const MAX: u32 = 30;
 
-    pub fn new(value: u32) -> Result<Self, WeekdaysError> {
+    pub(crate) fn new(value: u32) -> Result<Self, WeekdaysError> {
         if value < Self::MIN {
             return Err(WeekdaysError::TooFewDays(Self::MIN, value));
         }
@@ -18,7 +18,7 @@ impl Weekdays {
         Ok(Self(value))
     }
 
-    pub fn get(&self) -> u32 {
+    pub(crate) fn get(&self) -> u32 {
         self.0
     }
 }
@@ -30,7 +30,7 @@ impl Default for Weekdays {
 }
 
 #[derive(Error, Debug)]
-pub enum WeekdaysError {
+pub(crate) enum WeekdaysError {
     #[error("Weekdays must be at least {0}, got {1}")]
     TooFewDays(u32, u32),
     #[error("Weekdays must be at most {0}, got {1}")]

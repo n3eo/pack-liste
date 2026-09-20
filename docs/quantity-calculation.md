@@ -2,12 +2,16 @@
 
 ## Overview
 
-The Quantity Calculation feature dynamically adjusts packing list item quantities based on multiple input factors:
+The quantity calculation dynamically adjusts packing list item quantities
+based on the trip parameters:
 
 - **Weekdays**: Number of days for the trip
-- **Travel Style**: User's preferred packing style (minimalist, standard, luxury, backpacker)
-- **Weather Input**: Expected weather conditions (hot, cold, rainy, snowy, mixed)
-- **Activities**: Planned activities (hiking, beach, city tour, business, skiing, snowboarding, camping)
+- **Travel Style**: User's preferred packing style (e.g. minimalist,
+  standard, luxury, backpacker)
+- **Weather**: Expected weather condition (e.g. hot, cold, rainy, mixed)
+
+Travel styles and weather conditions are user-configurable (see the
+configuration screen, `O` from any screen); each carries a multiplier.
 
 ## Architecture
 
@@ -16,121 +20,62 @@ The Quantity Calculation feature dynamically adjusts packing list item quantitie
 ```
 src/
 ├── models/
-│   ├── weekdays.rs      # Weekdays input validation
-│   ├── travel_style.rs  # Travel style enum and multipliers
-│   ├── weather.rs       # Weather input enum and multipliers
-│   ├── activity.rs      # Activity enum and multipliers
-│   ├── item.rs          # Item model with quantity and packed status
-│   └── packing_list.rs  # Packing list model
-├── quantity/
-│   ├── model.rs         # Quantity calculation input/output models
-│   ├── calculation.rs   # Core calculation logic
-│   └── error.rs         # Quantity calculation errors
-├── services/
-│   ├── quantity_service.rs  # Quantity calculation service
-│   ├── packing_service.rs   # Packing list management service
-│   └── item_service.rs       # Item management service
-└── ui/
-    └── views/
-        ├── input.rs      # Input view for parameters
-        ├── list.rs       # Packing list view
-        └── summary.rs    # Summary view
+│   ├── item.rs          # Item model with quantity, packed, and selection state
+│   ├── packing_list.rs  # The packing list (item catalog)
+│   └── weekdays.rs      # Weekdays input validation
+├── config/
+│   ├── modifiers.rs     # ModifierConfig: named multipliers (travel style, weather)
+│   └── trip_file.rs     # The persisted trip file (compiled packing list)
+└── quantity/
+    ├── model.rs         # Quantity calculation input/output models
+    └── calculation.rs   # Core calculation logic
 ```
 
-## Calculation Algorithm
+The UI layer (`src/ui/`) drives the calculation: `state.rs` holds the trip
+parameters and calls `recalculate_quantities`, which resolves the
+configured multipliers and delegates to `QuantityCalculation::calculate`.
 
-### Base Calculation
+### Calculation Rule
 
-1. Start with base quantities based on weekdays
-2. Apply travel style multiplier
-3. Apply weather multiplier
-4. Apply activities multiplier (average of all selected activities)
+For each item:
 
-### Multipliers
+- **Fixed items** (`auto_quantity: false`, e.g. a toothbrush) keep their
+  quantity; it is never recalculated.
+- **Automatic items** get:
 
-| Factor | Value | Multiplier |
-|--------|-------|------------|
-| Travel Style | Minimalist | 0.5x |
-| Travel Style | Standard | 1.0x |
-| Travel Style | Luxury | 1.5x |
-| Travel Style | Backpacker | 1.2x |
-| Weather | Hot | 0.7x |
-| Weather | Cold | 1.5x |
-| Weather | Rainy | 1.2x |
-| Weather | Snowy | 1.8x |
-| Weather | Mixed | 1.0x |
-| Activity | Hiking | 1.5x |
-| Activity | Beach | 0.8x |
-| Activity | City Tour | 1.0x |
-| Activity | Business | 1.2x |
-| Activity | Skiing | 2.0x |
-| Activity | Snowboarding | 2.0x |
-| Activity | Camping | 1.8x |
-
-## Usage
-
-### CLI
-
-```bash
-# Run the application
-cargo run
-
-# With debug logging
-cargo run -- --debug
+```
+quantity = round(min(weekdays, 20) * travel_style_multiplier * weather_multiplier)
 ```
 
-### Configuration
+clamped to a minimum of 1. The base is capped at 20 days (spec 005
+EC-003); the weather multiplier always applies (the pre-activity rule,
+spec 017: no activity can suppress it).
 
-Packing lists are stored in `~/.config/pack-liste/` directory as JSON files.
+Unknown travel style or weather names fall back to a multiplier of 1.0.
 
-### Example Packing List
+### Recalculation Triggers
 
-```json
-{
-  "id": "list_123456789",
-  "name": "Summer Trip 2026",
-  "items": [
-    {
-      "id": "item_1",
-      "name": "T-shirts",
-      "category": "Clothing",
-      "base_quantity": 5,
-      "quantity": 7,
-      "packed": false,
-      "editable": true
-    }
-  ],
-  "file_path": null
-}
-```
+Quantities recalculate when trip parameters change (weekdays, travel
+style, weather on the welcome screen) and on the explicit `R` key on the
+main screen (spec 018). Manual edits to a fixed item's quantity are
+authoritative; only `R` recalculates.
+
+## Storage
+
+The input configuration (`~/.config/pack-liste/config.yaml`) stores the
+item catalog with per-item `auto_quantity` flags; fixed items persist
+their quantity, automatic items do not (they recalculate on load).
+
+The compiled packing list is persisted as a separate human-editable YAML
+trip file (the path chosen on the welcome screen or passed as the first
+CLI argument). It stores the trip parameters and the selected items with
+their packed state; quantities are not persisted and recalculate on load.
+On load it is reconciled against the current input config: items gone
+from the config are dropped, categories are remapped to the catalog
+item's primary category.
 
 ## Error Handling
 
-All errors use `thiserror` for clear error types and `anyhow` for error propagation.
-
-### Error Types
-
-- `WeekdaysError`: Invalid weekdays input
-- `QuantityError`: Quantity calculation errors
-- `ConfigError`: Configuration errors
-- `UiError`: UI rendering errors
-
-## Testing
-
-Run tests with:
-
-```bash
-cargo test
-```
-
-## Performance
-
-- Real-time updates: <500ms for quantity recalculations
-- Memory usage: <100MB
-- No unsafe Rust code
-
-## Constraints
-
-- Single-user terminal application
-- Offline-capable (no external API dependencies)
-- Rust 1.98 (2024 edition)
+The calculation returns `anyhow::Result`; failures propagate to the UI,
+where they are shown in the status line (a footer message on the main
+screen) instead of terminating the session.
