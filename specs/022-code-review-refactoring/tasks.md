@@ -169,6 +169,7 @@ Single project: `src/` at repository root. All UI work happens under `src/ui/` (
 - **US5 (Phase 6)**: Depends on US4 (error sites are in final-named modules).
 - **US6 (Phase 7)**: Depends on US5 (docs describe the final structure).
 - **Polish (Phase 8)**: Depends on all stories.
+- **Convergence (Phase 9)**: Depends on Phase 8; refines US5's status line and closes the Constitution III doc-comment gap. T040 and T041 both touch status handling — run T040 first (rendering), then T041 (clearing), then T042 (docs, parallel-safe), then T043 (verify).
 
 ### User Story Dependencies
 
@@ -230,7 +231,53 @@ Each story ends with the gate green and all tests passing, so stopping after any
 
 - [P] tasks = different files, no dependencies (rare here — see Parallel Opportunities).
 - [Story] labels map tasks to spec.md user stories for traceability.
-- The 39 existing tests are the behavioral contract (FR-011): assertions never change; only `use` paths do.
+- The 41 tests (39 original with unmodified assertions + 2 status-line tests) are the behavioral contract (FR-011): original assertions never change; only `use` paths do.
 - The help/hint contract tests (spec 016) guard the binding set through every step — do not weaken them.
 - Commit after each task or logical group; Conventional Commits (`refactor:` for moves/splits, `chore:` for dependency removal, `docs:` for US6).
 - Avoid: drive-by redesign beyond the spec's findings, weakening tests to make them pass, hand-editing `Cargo.lock`.
+
+---
+
+## Phase 9: Convergence
+
+**Goal**: Close the three partial gaps found by the convergence review: config-screen status rendering, status clearing on transitions, and doc comments on the remaining undocumented public items. Design decisions per plan.md "Convergence Refinements (Phase 9)".
+
+**Independent Test**: Full gate green with all 41 tests passing; a forced save failure from the config screen shows the status line on the config screen's footer; navigating away (Esc) clears a set status message; the doc-comment scan finds zero undocumented public items.
+
+### Implementation for Convergence
+
+- [X] T040 [US5] Render the status line in the config screen footer in `src/ui/screens/config.rs`: when `state.status` is set, it takes precedence over the hint line in the instructions area (matching the raw editor's error-footer pattern in `src/ui/screens/editor.rs`), styled red/bold for `StatusKind::Error` — identical styling to the main screen's status line in `src/ui/screens/main.rs`. This makes the config screen's own `save_config_or_report` failures (`src/ui/handlers/config.rs:67,156`) visible per US5/AC4 and data-model V3 (partial)
+- [X] T041 [US5] Clear the status message on screen and input-mode transitions in `src/ui/input.rs`: call `self.draw_state.clear_status()` in `handle_escape` (all screen-exit and mode-exit arms) and at every dialog-close site where `input_mode` returns to `InputMode::Normal` (the dialog save/cancel paths in `dispatch_key` and `handlers/welcome.rs`), so a stale error does not persist across navigation per data-model V3 and US5/AC1 (partial)
+- [X] T042 [P] Add `///` doc comments stating purpose and behavior to the 62 public items that lack them — no code changes, no behavior changes, per Constitution III (partial). By file:
+  - `src/models/item.rs`: `Item`, `new`
+  - `src/models/packing_list.rs`: `new`, `add_item`
+  - `src/models/weekdays.rs`: `Weekdays`, `new`, `get`, `WeekdaysError`
+  - `src/quantity/calculation.rs`: `QuantityCalculation`, `new`, `calculate`
+  - `src/quantity/model.rs`: `QuantityCalculationOutput`
+  - `src/config/modifiers.rs`: `travel_style_multiplier`, `weather_multiplier`
+  - `src/config/trip_file.rs`: `TripItem`
+  - `src/ui/config_io.rs`: `SavedItem`, `default_travel_style_name`, `default_weather_name`, `load_config`, `create_default_config`
+  - `src/ui/state.rs`: `Screen`, `FocusSide`, `Focus`, `next`, `prev`, `InputField`, `InputMode`, `AppState`, `StatusKind`, `title`, `next`, `prev`, `ModifierField`, `left_rows`, `right_item_order`, `toggle_category_collapse`, `toggle_item_selection`, `toggle_category_selection`, `toggle_item_packed`
+  - `src/ui/input.rs`: `App`, `new`, `save_config`, `update_quantities`, `run`, `handle_up`, `handle_down`, `toggle_category_collapse`, `toggle_item_selection`, `toggle_category_selection`, `toggle_item_packed_right_side`
+  - `src/ui/draw.rs`: `draw`
+  - `src/ui/handlers/config.rs`: `handle_config_screen_input`
+  - `src/ui/handlers/dialogs.rs`: `start_editing_item`, `save_new_item`, `save_edited_item`, `remove_item_confirmed`
+  - `src/ui/screens/config.rs`, `src/ui/screens/editor.rs`, `src/ui/screens/help.rs`, `src/ui/screens/main.rs`, `src/ui/screens/welcome.rs`: all `draw_*` fns
+  - `src/app.rs`: `run`
+- [X] T043 Verify Phase 9: full gate green (`cargo check`, `cargo clippy`, `cargo clippy --tests`, `cargo test`, `cargo fmt --check`), all 41 tests pass; forced-failure check per quickstart.md §5 including the two convergence additions (config-screen status visible; status cleared on Esc transition); doc-comment scan reports zero undocumented public items; PTY screen-diff against the pre-refactor binary still shows identical screens for the unchanged flows
+
+---
+
+## Phase 10: Convergence
+
+**Goal**: Close the two dispatcher regressions found by the convergence review (global keys firing inside text-input modes — a FR-011 behavior regression against the pre-refactor binary) and the remaining Constitution III doc-comment gap.
+
+**Independent Test**: Full gate green with all 88 tests passing; typing 'q' or 'o' inside the add/edit dialog's Name field and the welcome trip-file editor appends the character (PTY-verified against the pre-refactor binary's behavior); the doc-comment scan reports zero undocumented public items.
+
+### Implementation for Convergence
+
+- [ ] T044 [CRITICAL] Fix the global `q` arm in `dispatch_key` (`src/ui/input.rs:489`): it fires inside text-input modes — typing 'q' in the add/edit dialog's Name field or the welcome trip-file path editor quits the application mid-input (PTY-verified: the pre-refactor binary appends the character; the current binary exits). Guard it with `matches!(input_mode, InputMode::Normal)` and `!editing_trip_file`, matching the `?` arm's existing guard pattern (FR-002, FR-011) (contradicts)
+- [ ] T045 Fix the global `O` arm in `dispatch_key` (`src/ui/input.rs:511`): the same missing guard — typing 'o' in a dialog text field jumps to the config screen and orphans the open dialog (PTY-verified: Esc from config returns to the still-open add dialog). Apply the same guard as T044 (FR-002, FR-011) (contradicts)
+- [ ] T046 Add regression tests in `src/ui/tests/input.rs` pinning the dispatcher contract: a Char key inside `InputMode::AddingItem`/`EditingItem` text fields and inside `editing_trip_file` never triggers the global quit/config actions — the character lands in the field (the tests fail before T044/T045 and pass after) (Constitution III)
+- [ ] T047 [P] Convert the remaining `//` comments and missing comments to `///` doc comments on the 40 undocumented public items (Constitution III): `AppConfig` (`src/ui/config_io.rs:16`), `AppDrawState` (`src/ui/state.rs:298`), `PanelRow` (`src/ui/state.rs:399`), `active_rows`, `cursor_item_index`, `cursor_category`, `set_category_collapsed`, `cycle_category_selection`, `apply_item_edit`, `add_item_from_dialog`, `move_cursor_up`, `move_cursor_down` (`src/ui/state.rs`), `cycle_travel_style`, `cycle_weather`, `current_item_index`, `current_category` (`src/ui/input.rs`), `help_screen_text`, `help_content` (`src/ui/help.rs`), `help_binding_tokens` (`src/ui/hints.rs`), `category_all_packed` (`src/ui/screens/main.rs:317`), `Weekdays::MIN`/`MAX` (`src/models/weekdays.rs`), and the `mod` declarations — no code changes, no behavior changes (partial)
+- [ ] T048 Verify Phase 10: full gate green (`cargo check`, `cargo clippy`, `cargo clippy --tests`, `cargo test`, `cargo fmt --check`), all 88 tests pass; PTY check — type 'q' and 'o' in the add dialog's Name field and the trip-file editor: the characters append, the app stays in the dialog/editor; doc-comment scan reports zero undocumented public items

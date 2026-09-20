@@ -71,6 +71,22 @@ The welcome screen allows you to configure your trip parameters and the packing 
 
 The main screen shows all items grouped by category on the left, and the compiled packing list on the right. Both panels show a navigation hint line at the bottom at every supported terminal size.
 
+### Terminal Sizes
+
+The layout adapts to the terminal:
+
+| Size | Layout |
+|------|--------|
+| 80 columns and wider (at least 24 rows) | Two panels side by side |
+| 40–79 columns (at least 24 rows) | Stacked: both panels full-width, one above the other |
+| Below 40 columns or 24 rows | A resize notice only — no data is lost; resize back to continue |
+
+Long item names, categories, and file paths truncate with a visible `…` indicator — nothing is cut off silently. When the full hint lines would squeeze the lists, they collapse to a single `? Help` line; `?` opens the help screen at every size. The same key bindings work at every size.
+
+### Fullscreen Compiled List
+
+Press `F` on the main screen to toggle a fullscreen view of the compiled packing list. All compiled-list actions (navigate, toggle packed, recalculate) work there; `F` switches back. The view is presentation-only — quitting from fullscreen saves the trip exactly as from the two-panel view.
+
 ### Left Panel: All Items
 
 - Shows all categories with their items
@@ -98,7 +114,9 @@ The main screen shows all items grouped by category on the left, and the compile
 | A | Add a new item |
 | E | Edit the item under the cursor |
 | D | Delete the item under the cursor (with confirmation) |
-| R | Recalculate quantities on the current list |
+| R | Recalculate the current item (on a category header: its category) |
+| Ctrl+R | Recalculate the current item's category |
+| Ctrl+Shift+R | Recalculate every automatic item |
 | ? | Help screen |
 | Esc | Quit |
 
@@ -161,7 +179,10 @@ Edit the config file in-app.
 6. Press **A** to add a new item (the current category is preselected)
 7. Press **E** to edit the item under the cursor
 8. Press **D** to delete the item under the cursor (confirmation required)
-9. Press **R** to bring the amounts up to date (recalculates every automatic item; fixed items are untouched)
+9. Press **R** to recalculate the current item, **Ctrl+R** for its
+   category, or **Ctrl+Shift+R** for everything. Quantities never
+   change on their own: manual edits are authoritative, and only the
+   recalculate keys recalculate (fixed items are never touched).
 10. Press **q** to quit when done (config and trip file are saved)
 
 ## Configuration

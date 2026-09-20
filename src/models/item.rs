@@ -1,6 +1,23 @@
 use serde::{Deserialize, Serialize};
 
+/// The per-item buffer applied on top of the rate-based amount:
+/// a flat reserve added after it, or a multiplier scaling it —
+/// never both (the exclusivity is a type guarantee, spec 010).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Default)]
+pub(crate) enum QuantityBuffer {
+    /// No buffer (the default)
+    #[default]
+    None,
+    /// A flat amount added on top of the calculated amount,
+    /// independent of trip length and multipliers
+    Reserve(u32),
+    /// A scaling factor applied to the rate-based amount
+    Multiplier(f32),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// One packing-list item: its name, category memberships, quantity,
+/// and per-trip state (selected, packed, quantity mode).
 pub(crate) struct Item {
     pub(crate) name: String,
     /// The categories this item belongs to; at least one. The first entry
@@ -12,9 +29,17 @@ pub(crate) struct Item {
     /// When false, the quantity is fixed and not recalculated from
     /// trip parameters (e.g. a toothbrush always stays at 1)
     pub(crate) auto_quantity: bool,
+    /// How many of this item one trip day needs (spec 010);
+    /// 1.0 = one per day, 0.15 ≈ one per week. Default 1.0.
+    pub(crate) rate: f32,
+    /// The buffer applied on top of the rate-based amount (spec 010):
+    /// a flat reserve or a multiplier, never both. Default None.
+    pub(crate) buffer: QuantityBuffer,
 }
 
 impl Item {
+    /// Create an item: selected, unpacked, automatic quantity, with
+    /// the default modifiers (rate 1.0, no buffer).
     pub(crate) fn new(name: String, categories: Vec<String>, quantity: u32) -> Self {
         Self {
             name,
@@ -23,6 +48,8 @@ impl Item {
             packed: false,
             selected: true,
             auto_quantity: true,
+            rate: 1.0,
+            buffer: QuantityBuffer::None,
         }
     }
 

@@ -9,13 +9,17 @@ use crate::ui::hints::{HintSurface, hint_entries, hint_line};
 use crate::ui::screens::config::draw_config_screen;
 use crate::ui::screens::editor::draw_config_editor_screen;
 use crate::ui::screens::help::draw_help_screen;
-use crate::ui::screens::main::draw_main_screen;
+use crate::ui::screens::main::{draw_main_screen, truncate_row_text};
 use crate::ui::screens::welcome::draw_welcome_screen;
-use crate::ui::state::{InputField, InputMode, PopupFields, Screen};
+use crate::ui::state::{
+    InputField, InputMode, PendingEdit, PopupFields, QuantityBufferKind, Screen,
+};
 
 use crate::ui::input::App;
 
 impl App {
+    /// Render the current screen and persist the scroll offsets
+    /// computed during rendering.
     pub(crate) fn draw(&mut self) -> Result<()> {
         // The per-frame clone is an accepted trade-off (spec 022 FR-012):
         // terminal.draw needs &mut on the closure state while App holds
@@ -36,48 +40,24 @@ impl App {
                     InputMode::Normal => {
                         draw_main_screen(f, size, &mut state);
                     }
-                    InputMode::AddingItem {
-                        field,
-                        ref name,
-                        ref category,
-                        ref quantity,
-                        ref category_list,
-                        category_index,
-                    } => {
-                        let fields = PopupFields {
-                            field,
-                            name,
-                            category,
-                            quantity,
-                            auto_quantity: None,
-                            category_list,
-                            category_index,
-                        };
-                        draw_item_dialog(f, size, "Add New Item", &fields);
-                    }
-                    InputMode::EditingItem {
-                        field,
-                        ref name,
-                        ref category,
-                        ref quantity,
-                        auto_quantity,
-                        ref category_list,
-                        category_index,
-                        ..
-                    } => {
-                        let fields = PopupFields {
-                            field,
-                            name,
-                            category,
-                            quantity,
-                            auto_quantity: Some(auto_quantity),
-                            category_list,
-                            category_index,
-                        };
-                        draw_item_dialog(f, size, "Edit Item", &fields);
-                    }
                     InputMode::ConfirmDelete { index } => {
                         draw_confirm_delete_popup(f, size, index, &state.packing_list);
+                    }
+                    InputMode::ConfirmEdit { ref pending } => {
+                        draw_confirm_edit_popup(f, size, pending, &state.packing_list);
+                    }
+                    InputMode::AddingItem { .. } | InputMode::EditingItem { .. } => {
+                        // The shared dialog surface (spec 021, US3):
+                        // one renderer for both dialogs
+                        if let Some(fields) = state.input_mode.popup_fields() {
+                            let title = if matches!(state.input_mode, InputMode::EditingItem { .. })
+                            {
+                                "Edit Item"
+                            } else {
+                                "Add New Item"
+                            };
+                            draw_item_dialog(f, size, title, &fields);
+                        }
                     }
                 },
                 Screen::Help => {
@@ -110,7 +90,9 @@ fn draw_item_dialog(
 ) {
     // Create a centered popup with dynamic size
     let popup_width = (size.width * 60 / 100).clamp(40, 60);
-    let popup_height = 14;
+    // Six field rows (Name, Category, Quantity, Mode, Rate, Buffer)
+    // plus borders and the hint area
+    let popup_height = 16;
 
     let popup_area = Rect {
         x: (size.width.saturating_sub(popup_width)) / 2,
@@ -231,15 +213,91 @@ fn draw_item_dialog(
         f.render_widget(mode_para, mode_area);
     }
 
-    // Draw instructions
-    let instructions_area = Rect {
+    // Draw rate field (spec 010): the item's per-day rate
+    let rate_area = Rect {
         x: content_area.x,
         y: content_area.y + 4,
         width: content_area.width,
-        height: content_area.height - 4,
+        height: 1,
+    };
+    let rate_line = Line::from(vec![
+        Span::raw("Rate/day: ").style(if fields.field == InputField::Rate {
+            field_style
+        } else {
+            normal_style
+        }),
+        Span::raw(fields.rate),
+        Span::raw("  (days x rate)").dim(),
+    ]);
+    let rate_para = Paragraph::new(vec![rate_line]);
+    f.render_widget(rate_para, rate_area);
+
+    // Draw buffer field (spec 010): the kind and its value
+    let buffer_area = Rect {
+        x: content_area.x,
+        y: content_area.y + 5,
+        width: content_area.width,
+        height: 1,
+    };
+    let buffer_kind_text = match fields.buffer_kind {
+        QuantityBufferKind::None => "none",
+        QuantityBufferKind::Reserve => "reserve +",
+        QuantityBufferKind::Multiplier => "multiplier x",
+    };
+    let buffer_line = Line::from(vec![
+        Span::raw("Buffer: ").style(if fields.field == InputField::Buffer {
+            field_style
+        } else {
+            normal_style
+        }),
+        Span::raw(buffer_kind_text).style(if fields.field == InputField::Buffer {
+            field_style
+        } else {
+            normal_style
+        }),
+        Span::raw(fields.buffer_value),
+        Span::raw("  (Space cycles kind)").dim(),
+    ]);
+    let buffer_para = Paragraph::new(vec![buffer_line]);
+    f.render_widget(buffer_para, buffer_area);
+
+    // Draw instructions
+    let instructions_area = Rect {
+        x: content_area.x,
+        y: content_area.y + 6,
+        width: content_area.width,
+        height: content_area.height - 6,
     };
     let instructions = Paragraph::new(hint_line(hint_entries(HintSurface::AddEditPopup)));
     f.render_widget(instructions, instructions_area);
+
+    // Text cursor (spec 020, US2): a highlighted cell immediately
+    // after the focused free-text field's text (Name, Quantity only);
+    // the position is derived from the text length — no new state
+    // (the raw editor's cursor-cell pattern)
+    let cursor = match fields.field {
+        InputField::Name => Some((name_area.y, "Name: ".len() + fields.name.chars().count())),
+        InputField::Quantity => Some((
+            quantity_area.y,
+            "Quantity: ".len() + fields.quantity.chars().count(),
+        )),
+        _ => None,
+    };
+    if let Some((y, offset)) = cursor {
+        let x = content_area.x + offset as u16;
+        if x < content_area.x + content_area.width {
+            let cell = Rect {
+                x,
+                y,
+                width: 1,
+                height: 1,
+            };
+            f.render_widget(
+                Paragraph::new(" ").style(Style::new().bg(Color::Yellow).fg(Color::Yellow)),
+                cell,
+            );
+        }
+    }
 
     // Draw category dropdown or selected category (last, so the open dropdown overlays the fields below)
     if fields.field == InputField::Category {
@@ -331,11 +389,112 @@ fn draw_confirm_delete_popup(
         Line::from(""),
         Line::from(vec![
             Span::raw("Delete ").bold(),
-            Span::raw(item_name).fg(Color::Red).bold(),
+            Span::raw(truncate_row_text(
+                item_name,
+                "Delete ",
+                "?",
+                content_area.width as usize,
+            ))
+            .fg(Color::Red)
+            .bold(),
             Span::raw("?"),
         ]),
         Line::from(""),
         hint_line(hint_entries(HintSurface::DeletePopup)),
+    ];
+
+    let content = Paragraph::new(lines);
+    f.render_widget(content, content_area);
+}
+
+/// The edit-confirmation popup (spec 011): the pending change is
+/// shown before it is applied — the item's name and the new values
+/// (name, categories, quantity, mode; old values where space
+/// allows). The delete popup's pattern: centered, min()-sized for
+/// small terminals.
+fn draw_confirm_edit_popup(
+    f: &mut ratatui::prelude::Frame,
+    size: Rect,
+    pending: &PendingEdit,
+    packing_list: &PackingList,
+) {
+    // Create a centered popup with dynamic size
+    let popup_width = (size.width * 50 / 100).clamp(40, 60);
+    let popup_height = 10;
+
+    let popup_area = Rect {
+        x: (size.width.saturating_sub(popup_width)) / 2,
+        y: (size.height.saturating_sub(popup_height)) / 2,
+        width: popup_width,
+        height: popup_height.min(size.height),
+    };
+
+    // Draw background overlay
+    let background = Block::default()
+        .style(Style::new().bg(Color::Black).fg(Color::White))
+        .borders(Borders::NONE);
+    f.render_widget(background, size);
+
+    // Draw popup
+    let popup_block = Block::default()
+        .title("Confirm Edit")
+        .borders(Borders::ALL)
+        .style(Style::new().bg(Color::Black).fg(Color::White));
+    f.render_widget(popup_block, popup_area);
+
+    // Popup content
+    let content_area = Rect {
+        x: popup_area.x + 1,
+        y: popup_area.y + 1,
+        width: popup_area.width - 2,
+        height: popup_area.height - 2,
+    };
+
+    // The item's current values, shown where space allows (US2)
+    let old = packing_list.items.get(pending.index);
+    let old_name = old.map(|i| i.name.as_str()).unwrap_or("Unknown");
+    let old_quantity = old.map(|i| i.quantity.to_string()).unwrap_or_default();
+
+    let mode = if pending.auto_quantity {
+        "automatic"
+    } else {
+        "fixed"
+    };
+    let new_quantity = pending
+        .quantity
+        .parse::<u32>()
+        .map(|q| q.to_string())
+        .unwrap_or_else(|_| pending.quantity.clone());
+
+    let lines = vec![
+        Line::from(vec![
+            Span::raw("Save changes to ").bold(),
+            Span::raw(truncate_row_text(
+                old_name,
+                "Save changes to ",
+                "?",
+                content_area.width as usize,
+            ))
+            .fg(Color::Yellow)
+            .bold(),
+            Span::raw("?"),
+        ]),
+        Line::from(""),
+        Line::from(vec![Span::raw("Name: ").dim(), Span::raw(&pending.name)]),
+        Line::from(vec![
+            Span::raw("Categories: ").dim(),
+            Span::raw(pending.categories.join(", ")),
+        ]),
+        Line::from(vec![
+            Span::raw("Quantity: ").dim(),
+            Span::raw(&new_quantity),
+            Span::raw(" (was ").dim(),
+            Span::raw(old_quantity).dim(),
+            Span::raw(")").dim(),
+        ]),
+        Line::from(vec![Span::raw("Mode: ").dim(), Span::raw(mode)]),
+        Line::from(""),
+        hint_line(hint_entries(HintSurface::ConfirmEditPopup)),
     ];
 
     let content = Paragraph::new(lines);

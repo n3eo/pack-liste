@@ -101,7 +101,7 @@ fn hint_entries_match_the_contract_binding_sets() {
     // the contract's binding set exactly, so removing or corrupting
     // an entry (e.g. deleting ("C", "Collapse") from the left
     // panel) fails this test.
-    let expected: [(HintSurface, &[(&str, &str)]); 8] = [
+    let expected: [(HintSurface, &[(&str, &str)]); 9] = [
         (
             HintSurface::LeftPanel,
             &[
@@ -112,8 +112,11 @@ fn hint_entries_match_the_contract_binding_sets() {
                 ("E", "Edit"),
                 ("D", "Delete"),
                 ("C", "Collapse"),
-                ("R", "Recalculate"),
+                ("R", "Recalc item"),
+                ("Ctrl+R", "Recalc category"),
+                ("Ctrl+Shift+R", "Recalc all"),
                 ("Tab", "Switch"),
+                ("F", "Fullscreen"),
                 ("?", "Help"),
             ],
         ),
@@ -122,8 +125,11 @@ fn hint_entries_match_the_contract_binding_sets() {
             &[
                 ("↑/↓", "Navigate"),
                 ("Space", "Packed"),
-                ("R", "Recalculate"),
+                ("R", "Recalc item"),
+                ("Ctrl+R", "Recalc category"),
+                ("Ctrl+Shift+R", "Recalc all"),
                 ("Tab", "Switch"),
+                ("F", "Fullscreen"),
                 ("?", "Help"),
             ],
         ),
@@ -156,15 +162,19 @@ fn hint_entries_match_the_contract_binding_sets() {
             HintSurface::AddEditPopup,
             &[
                 ("Tab", "Cycle fields"),
-                ("↑/↓", "Category dropdown"),
-                ("←/→", "Cycle category"),
-                ("Space", "Mode / Category"),
+                ("↑/↓", "Fields / dropdown"),
+                ("←/→", "Adjust values"),
+                ("Space", "Mode / Buffer / Category"),
                 ("Enter", "Save"),
                 ("Esc", "Cancel"),
             ],
         ),
         (
             HintSurface::DeletePopup,
+            &[("Enter", "Confirm"), ("Esc", "Cancel")],
+        ),
+        (
+            HintSurface::ConfirmEditPopup,
             &[("Enter", "Confirm"), ("Esc", "Cancel")],
         ),
         (
@@ -214,6 +224,7 @@ fn hint_lines_use_the_unified_style() {
             HintSurface::Config,
             HintSurface::AddEditPopup,
             HintSurface::DeletePopup,
+            HintSurface::ConfirmEditPopup,
             HintSurface::ModifierEditor,
             HintSurface::RawEditor,
         ] {

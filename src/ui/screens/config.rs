@@ -4,8 +4,10 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::ui::hints::{HintSurface, hint_entries, hint_line};
-use crate::ui::state::{AppDrawState, ConfigSection, ModifierField};
+use crate::ui::state::{AppDrawState, ConfigSection, ModifierField, StatusKind};
 
+/// Render the config screen: section tabs, the modifier list, the
+/// modifier editor popup when open, and the footer (status or hints).
 pub(crate) fn draw_config_screen(
     f: &mut ratatui::prelude::Frame,
     size: Rect,
@@ -172,8 +174,19 @@ pub(crate) fn draw_config_screen(
         },
     );
 
-    // Instructions
-    let instructions =
-        Paragraph::new(hint_line(hint_entries(HintSurface::Config))).wrap(Wrap { trim: true });
-    f.render_widget(instructions, instructions_area);
+    // Footer: the status message takes precedence over the hint line,
+    // matching the raw editor's error-footer pattern
+    let footer = match &state.status {
+        Some(status) => Line::from(vec![
+            Span::raw(" "),
+            Span::raw(status.message.clone()).style(match status.kind {
+                StatusKind::Error => Style::new().fg(Color::Red).bold(),
+            }),
+        ]),
+        None => hint_line(hint_entries(HintSurface::Config)),
+    };
+    f.render_widget(
+        Paragraph::new(footer).wrap(Wrap { trim: true }),
+        instructions_area,
+    );
 }

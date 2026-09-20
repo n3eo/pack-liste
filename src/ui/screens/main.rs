@@ -6,35 +6,131 @@ use ratatui::widgets::{
 };
 
 use crate::models::item::Item;
-use crate::ui::hints::{HintSurface, hint_entries, hint_rows};
+use crate::ui::hints::{
+    HintSurface, collapsed_hint_line, hint_entries, hint_rows, hint_rows_fit_budget,
+};
 use crate::ui::state::{AppDrawState, FocusSide, PanelRow, StatusKind, group_items_by_category};
 
+/// The main screen's layout mode (spec 006): a pure function of the
+/// viewport, recomputed per frame — no persisted state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LayoutMode {
+    /// Two panels side by side (at or above the width threshold)
+    SideBySide,
+    /// Both panels full-width, stacked vertically (narrow terminals)
+    Stacked,
+    /// Below the minimum usable size: only the resize notice
+    TooSmall,
+}
+
+/// The side-by-side threshold (plan D2): two 39-column minimum
+/// panels plus margins — at or above 80 columns the panels fit
+/// side by side; below it they stack.
+const SIDE_BY_SIDE_MIN_WIDTH: u16 = 80;
+/// The minimum usable height: below it the notice replaces the
+/// layout (FR-008's framing — the smallest size the layouts serve).
+const MIN_HEIGHT: u16 = 24;
+/// The minimum usable width even for the stacked mode: the rows
+/// need room for the selection symbol, name, and quantity.
+const MIN_WIDTH: u16 = 40;
+
+/// Decide the layout mode from the viewport (pure, stable at the
+/// boundary: the same inputs always give the same mode).
+pub(crate) fn layout_mode(width: u16, height: u16) -> LayoutMode {
+    if width < MIN_WIDTH || height < MIN_HEIGHT {
+        LayoutMode::TooSmall
+    } else if width >= SIDE_BY_SIDE_MIN_WIDTH {
+        LayoutMode::SideBySide
+    } else {
+        LayoutMode::Stacked
+    }
+}
+
+/// Render the main screen: the all-items panel on the left and the
+/// compiled packing list on the right.
 pub(crate) fn draw_main_screen(
     f: &mut ratatui::prelude::Frame,
     size: Rect,
     state: &mut AppDrawState,
 ) {
-    // Split screen: left (all items), right (selected items only)
-    let [left_area, right_area] = *Layout::default()
-        .direction(Direction::Horizontal)
-        .margin(1)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(size)
-    else {
+    // Fullscreen compiled-list view (spec 007): the same renderer at
+    // the full main-screen area — presentation-only
+    if state.fullscreen {
+        draw_selected_items_panel(f, size, state);
         return;
+    }
+
+    // The layout adapts to the viewport (spec 006): side by side,
+    // stacked, or the too-small notice
+    match layout_mode(size.width, size.height) {
+        LayoutMode::TooSmall => {
+            draw_too_small_notice(f, size);
+        }
+        LayoutMode::SideBySide => {
+            // Split screen: left (all items), right (selected items only)
+            let [left_area, right_area] = *Layout::default()
+                .direction(Direction::Horizontal)
+                .margin(1)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(size)
+            else {
+                return;
+            };
+            draw_all_items_panel(f, left_area, state);
+            draw_selected_items_panel(f, right_area, state);
+        }
+        LayoutMode::Stacked => {
+            // Both panels full-width, stacked vertically (plan D1:
+            // the same renderers, different areas)
+            let [top_area, bottom_area] = *Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(size)
+            else {
+                return;
+            };
+            draw_all_items_panel(f, top_area, state);
+            draw_selected_items_panel(f, bottom_area, state);
+        }
+    }
+}
+
+/// The too-small notice (spec 006, US4): the only thing drawn below
+/// the minimum usable size; all state is untouched.
+fn draw_too_small_notice(f: &mut ratatui::prelude::Frame, size: Rect) {
+    // The message truncates to the width — the notice itself must
+    // never overflow (US4/AC3)
+    let full = "Terminal too small — resize to at least 40x24";
+    let short = "Too small";
+    let text = if size.width as usize >= full.chars().count() {
+        full
+    } else if size.width as usize >= short.chars().count() {
+        short
+    } else {
+        ""
     };
-
-    // Draw left panel - all items with selection toggle
-    draw_all_items_panel(f, left_area, state);
-
-    // Draw right panel - only selected items
-    draw_selected_items_panel(f, right_area, state);
+    let line = Line::from(text).fg(Color::Yellow);
+    let area = Rect {
+        x: 0,
+        y: size.height / 2,
+        width: size.width,
+        height: 1,
+    };
+    f.render_widget(Paragraph::new(line), area);
 }
 
 fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut AppDrawState) {
     // The hint footer's height adapts to the panel width: entries are
-    // packed into as few rows as fit, so every binding stays visible
-    let hint_lines = hint_rows(hint_entries(HintSurface::LeftPanel), area.width as usize);
+    // packed into as few rows as fit, so every binding stays visible.
+    // When the packed rows would squeeze the list below its minimum
+    // (spec 006, US5), the hints collapse to the single `? Help` line.
+    let entries = hint_entries(HintSurface::LeftPanel);
+    let hint_lines = if hint_rows_fit_budget(entries, area.width as usize, 3) {
+        hint_rows(entries, area.width as usize)
+    } else {
+        vec![collapsed_hint_line()]
+    };
     let hints_height = hint_lines.len() as u16;
     // One extra row for the status line when a message is pending
     let status_height = u16::from(state.status.is_some());
@@ -105,7 +201,14 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
         let category_symbol = if is_collapsed { "▶ " } else { "▼ " };
         let category_line = Line::from(vec![
             Span::raw(category_symbol).fg(Color::Yellow),
-            Span::raw(category).bold().fg(Color::Cyan),
+            Span::raw(truncate_row_text(
+                category,
+                category_symbol,
+                "",
+                list_area.width as usize,
+            ))
+            .bold()
+            .fg(Color::Cyan),
         ]);
 
         let category_para =
@@ -142,8 +245,8 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
                 };
 
                 let selection_symbol = if is_selected { "✓" } else { "○" };
-                let item_symbol = if item.packed { "✓ " } else { "○ " };
 
+                let quantity_suffix = format!(" x{}", item.quantity);
                 let item_line = Line::from(vec![
                     Span::raw("  "),
                     Span::raw(selection_symbol).fg(if is_selected {
@@ -152,13 +255,13 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
                         Color::Red
                     }),
                     Span::raw(" "),
-                    Span::raw(item_symbol).fg(if item.packed {
-                        Color::Green
-                    } else {
-                        Color::Red
-                    }),
-                    Span::raw(" "),
-                    Span::raw(&item.name).style(item_style),
+                    Span::raw(truncate_row_text(
+                        &item.name,
+                        "  ✓ ",
+                        &quantity_suffix,
+                        list_area.width as usize,
+                    ))
+                    .style(item_style),
                     Span::raw(" x"),
                     Span::raw(item.quantity.to_string()).bold(),
                 ]);
@@ -215,14 +318,41 @@ pub(crate) fn category_all_packed(packed_states: &[bool]) -> bool {
     packed_states.iter().all(|&p| p)
 }
 
+/// Truncate a row's text so the whole row fits the panel width,
+/// with a visible `…` indicator when it does not (spec 006, US1/AC3
+/// — nothing truncates silently). `prefix` and `suffix` are the
+/// fixed-width parts around the text (e.g. "  ✓ " and " x6").
+pub(crate) fn truncate_row_text(text: &str, prefix: &str, suffix: &str, width: usize) -> String {
+    let prefix_len = prefix.chars().count();
+    let suffix_len = suffix.chars().count();
+    let available = width.saturating_sub(prefix_len + suffix_len);
+    let text_len = text.chars().count();
+    if text_len <= available {
+        text.to_string()
+    } else if available == 0 {
+        String::new()
+    } else {
+        // Keep available-1 chars plus the ellipsis
+        let kept: String = text.chars().take(available.saturating_sub(1)).collect();
+        format!("{kept}…")
+    }
+}
+
 fn draw_selected_items_panel(
     f: &mut ratatui::prelude::Frame,
     area: Rect,
     state: &mut AppDrawState,
 ) {
     // The hint footer's height adapts to the panel width: entries are
-    // packed into as few rows as fit, so every binding stays visible
-    let hint_lines = hint_rows(hint_entries(HintSurface::RightPanel), area.width as usize);
+    // packed into as few rows as fit, so every binding stays visible.
+    // When the packed rows would squeeze the list below its minimum
+    // (spec 006, US5), the hints collapse to the single `? Help` line.
+    let entries = hint_entries(HintSurface::RightPanel);
+    let hint_lines = if hint_rows_fit_budget(entries, area.width as usize, 3) {
+        hint_rows(entries, area.width as usize)
+    } else {
+        vec![collapsed_hint_line()]
+    };
     let hints_height = hint_lines.len() as u16;
     let [title_area, list_area, hints_area, stats_area] = *Layout::default()
         .direction(Direction::Vertical)
@@ -331,7 +461,14 @@ fn draw_selected_items_panel(
                 let category_line = Line::from(vec![
                     Span::raw(marker).fg(marker_color),
                     Span::raw("▼ "),
-                    Span::raw(category).bold().fg(Color::Cyan),
+                    Span::raw(truncate_row_text(
+                        category,
+                        &format!("{marker}▼ "),
+                        "",
+                        list_area.width as usize,
+                    ))
+                    .bold()
+                    .fg(Color::Cyan),
                 ]);
 
                 let category_para = Paragraph::new(vec![category_line])
@@ -359,6 +496,7 @@ fn draw_selected_items_panel(
 
                 let item_symbol = if item.packed { "✓ " } else { "○ " };
 
+                let quantity_suffix = format!(" x{}", item.quantity);
                 let item_line = Line::from(vec![
                     Span::raw("  "),
                     Span::raw(item_symbol).fg(if item.packed {
@@ -367,7 +505,13 @@ fn draw_selected_items_panel(
                         Color::Red
                     }),
                     Span::raw(" "),
-                    Span::raw(&item.name).style(item_style),
+                    Span::raw(truncate_row_text(
+                        &item.name,
+                        "  ✓ ",
+                        &quantity_suffix,
+                        list_area.width as usize,
+                    ))
+                    .style(item_style),
                     Span::raw(" x"),
                     Span::raw(item.quantity.to_string()).bold(),
                 ]);

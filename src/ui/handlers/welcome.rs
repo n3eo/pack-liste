@@ -2,7 +2,7 @@ use anyhow::Result;
 use crossterm::event::KeyEvent;
 
 use crate::ui::input::App;
-use crate::ui::state::{Focus, FocusSide, InputMode, Screen};
+use crate::ui::state::{Focus, FocusSide, InputField, InputMode, RecalculateScope, Screen};
 
 /// Key handling of the welcome screen (file field editing, value
 /// adjustment, focus movement) and the resume prompt.
@@ -32,12 +32,12 @@ pub(crate) fn handle_welcome_input(app: &mut App, key: KeyEvent) -> Result<bool>
                 app.adjust_weekdays(direction)?;
             }
             Focus::TravelStyle => {
+                // Parameters change; quantities recalculate only on the
+                // explicit recalculate keys (spec 018, amended)
                 app.cycle_travel_style(direction);
-                app.update_quantities()?;
             }
             Focus::Weather => {
                 app.cycle_weather(direction);
-                app.update_quantities()?;
             }
         }
         return Ok(false);
@@ -112,7 +112,6 @@ fn handle_resume_prompt(app: &mut App, key: KeyEvent) -> Result<bool> {
             // Fresh list: keep everything selected; the
             // remembered path stays saved for the next run
             app.select_all_items();
-            app.update_quantities()?;
         }
         _ => {}
     }
@@ -161,11 +160,27 @@ pub(crate) fn handle_main_input(app: &mut App, key: KeyEvent) -> Result<bool> {
 
     match key.code {
         K::Tab => {
-            // Switch between left and right panels
-            app.switch_focus_side();
+            // Switch between left and right panels; a no-op in
+            // fullscreen (spec 007, plan D3 — the fullscreen key is
+            // the way back)
+            if !app.draw_state.fullscreen {
+                app.switch_focus_side();
+            }
         }
         K::BackTab => {
-            app.switch_focus_side();
+            if !app.draw_state.fullscreen {
+                app.switch_focus_side();
+            }
+        }
+        K::Char('f') | K::Char('F') => {
+            // Toggle the fullscreen compiled-list view (spec 007):
+            // presentation-only, both directions
+            app.draw_state.fullscreen = !app.draw_state.fullscreen;
+            // The compiled list is the only panel in fullscreen:
+            // focus the right side so the actions target it
+            if app.draw_state.fullscreen {
+                app.draw_state.focus_side = FocusSide::Right;
+            }
         }
         K::Up => {
             app.handle_up()?;
@@ -205,41 +220,84 @@ pub(crate) fn handle_main_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         K::Char('r') | K::Char('R') => {
-            // Recalculate the current list's quantities (spec 018):
-            // works from both list views, unbound everywhere else
-            app.update_quantities()?;
+            // Plain R = the current item (spec 018); on a category
+            // header it means the header's category (EC-001). The
+            // Ctrl+R / Ctrl+Shift+R chords are matched in the
+            // dispatcher before this arm.
+            if let Some(idx) = app.current_item_index() {
+                app.recalculate_current_scope(RecalculateScope::Item(idx))?;
+            } else if let Some(category) = app.current_category() {
+                app.recalculate_current_scope(RecalculateScope::Category(category))?;
+            }
         }
         _ => {}
     }
     Ok(false)
 }
 
-/// Key handling of the add/edit item dialogs and the delete
-/// confirmation popup.
+/// Key handling of the add/edit item dialogs and the delete/edit
+/// confirmation popups.
 pub(crate) fn handle_dialog_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     use crossterm::event::KeyCode as K;
     match &mut app.draw_state.input_mode {
         InputMode::AddingItem { .. } | InputMode::EditingItem { .. } => {
             match key.code {
                 K::Enter => {
-                    app.save_open_dialog();
-                    app.draw_state.input_mode = InputMode::Normal;
+                    // The add dialog saves directly (scope note); the
+                    // edit dialog routes through the confirmation
+                    // (spec 011): the dialog's state is consumed into
+                    // the snapshot, so cancelling cannot half-apply
+                    if matches!(app.draw_state.input_mode, InputMode::EditingItem { .. }) {
+                        app.route_edit_to_confirmation();
+                    } else {
+                        app.save_open_dialog();
+                        // A status message does not persist across the
+                        // mode change back to Normal (V3)
+                        app.draw_state.clear_status();
+                        app.draw_state.input_mode = InputMode::Normal;
+                    }
                 }
                 K::Tab => {
                     app.cycle_dialog_field();
                 }
                 K::Up | K::Down => {
-                    // Move the category dropdown highlight (category field)
-                    if key.code == K::Up {
-                        app.draw_state.move_cursor_up();
-                    } else {
-                        app.draw_state.move_cursor_down();
+                    // In the Category field, Up/Down move the dropdown
+                    // highlight (EC-001 of spec 020); in every other
+                    // field they cycle the dialog's fields
+                    let is_category = matches!(
+                        app.draw_state.input_mode,
+                        InputMode::AddingItem {
+                            field: InputField::Category,
+                            ..
+                        } | InputMode::EditingItem {
+                            field: InputField::Category,
+                            ..
+                        }
+                    );
+                    if is_category {
+                        if key.code == K::Up {
+                            app.draw_state.move_cursor_up();
+                        } else {
+                            app.draw_state.move_cursor_down();
+                        }
+                    } else if let InputMode::AddingItem { field, .. }
+                    | InputMode::EditingItem { field, .. } =
+                        &mut app.draw_state.input_mode
+                    {
+                        *field = if key.code == K::Up {
+                            field.prev()
+                        } else {
+                            field.next()
+                        };
                     }
                 }
                 K::Left | K::Right => {
-                    // Cycle the category selection (category field)
+                    // Horizontal adjusts the focused field's value
+                    // (spec 020, US3): the category cycles the
+                    // selection; the quantity steps ±1
                     let direction = if key.code == K::Right { 1 } else { -1 };
                     app.draw_state.cycle_category_selection(direction);
+                    app.draw_state.step_dialog_quantity(direction);
                 }
                 K::Char(' ') => {
                     app.handle_dialog_space();
@@ -258,9 +316,32 @@ pub(crate) fn handle_dialog_input(app: &mut App, key: KeyEvent) -> Result<bool> 
             if key.code == K::Enter {
                 let index = *index;
                 app.remove_item_confirmed(index);
+                // A status message does not persist across the
+                // mode change back to Normal (V3)
+                app.draw_state.clear_status();
                 app.draw_state.input_mode = InputMode::Normal;
                 // Save config after deletion
                 app.save_config()?;
+            }
+            Ok(false)
+        }
+        InputMode::ConfirmEdit { .. } => {
+            match key.code {
+                K::Enter => {
+                    // Confirm: apply the snapshot and write the config
+                    // (spec 011, US1/AC2)
+                    app.apply_pending_edit()?;
+                    app.draw_state.clear_status();
+                    app.draw_state.input_mode = InputMode::Normal;
+                }
+                K::Esc | K::Char('n') | K::Char('N') => {
+                    // Cancel: drop the snapshot, nothing written
+                    // (spec 011, US3/AC1); one Esc returns to the list
+                    // (plan D4 — the dialog is already consumed)
+                    app.draw_state.clear_status();
+                    app.draw_state.input_mode = InputMode::Normal;
+                }
+                _ => {}
             }
             Ok(false)
         }

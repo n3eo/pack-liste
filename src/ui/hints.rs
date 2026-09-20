@@ -10,6 +10,7 @@ pub(crate) enum HintSurface {
     Config,
     AddEditPopup,
     DeletePopup,
+    ConfirmEditPopup,
     ModifierEditor,
     RawEditor,
 }
@@ -26,15 +27,21 @@ pub(crate) fn hint_entries(surface: HintSurface) -> &'static [(&'static str, &'s
             ("E", "Edit"),
             ("D", "Delete"),
             ("C", "Collapse"),
-            ("R", "Recalculate"),
+            ("R", "Recalc item"),
+            ("Ctrl+R", "Recalc category"),
+            ("Ctrl+Shift+R", "Recalc all"),
             ("Tab", "Switch"),
+            ("F", "Fullscreen"),
             ("?", "Help"),
         ],
         HintSurface::RightPanel => &[
             ("↑/↓", "Navigate"),
             ("Space", "Packed"),
-            ("R", "Recalculate"),
+            ("R", "Recalc item"),
+            ("Ctrl+R", "Recalc category"),
+            ("Ctrl+Shift+R", "Recalc all"),
             ("Tab", "Switch"),
+            ("F", "Fullscreen"),
             ("?", "Help"),
         ],
         HintSurface::Welcome => &[
@@ -58,13 +65,14 @@ pub(crate) fn hint_entries(surface: HintSurface) -> &'static [(&'static str, &'s
         ],
         HintSurface::AddEditPopup => &[
             ("Tab", "Cycle fields"),
-            ("↑/↓", "Category dropdown"),
-            ("←/→", "Cycle category"),
-            ("Space", "Mode / Category"),
+            ("↑/↓", "Fields / dropdown"),
+            ("←/→", "Adjust values"),
+            ("Space", "Mode / Buffer / Category"),
             ("Enter", "Save"),
             ("Esc", "Cancel"),
         ],
         HintSurface::DeletePopup => &[("Enter", "Confirm"), ("Esc", "Cancel")],
+        HintSurface::ConfirmEditPopup => &[("Enter", "Confirm"), ("Esc", "Cancel")],
         HintSurface::ModifierEditor => &[
             ("Tab", "Switch field"),
             ("Enter", "Save"),
@@ -135,6 +143,25 @@ pub(crate) fn hint_rows(
     rows
 }
 
+/// The collapsed hint line (spec 006, US5): a single short pointer
+/// when the full rows would squeeze the lists.
+pub(crate) fn collapsed_hint_line() -> Line<'static> {
+    hint_line(&[("?", "Help")])
+}
+
+/// The collapse decision (spec 006, US5, plan D3): when the packed
+/// hint rows would squeeze the lists beyond the height budget, the
+/// hints collapse to the single short `? Help` line. A pure
+/// function of (entries, width, budget) — stable at the boundary
+/// because it is recomputed per frame from the same inputs.
+pub(crate) fn hint_rows_fit_budget(
+    entries: &[(&'static str, &'static str)],
+    width: usize,
+    height_budget: usize,
+) -> bool {
+    hint_rows(entries, width).len() <= height_budget
+}
+
 // The binding tokens the help screen must list; the extraction test
 // compares this against the handler bindings (SC-004).
 #[cfg(test)]
@@ -166,6 +193,8 @@ pub(crate) fn help_binding_tokens() -> Vec<&'static str> {
         "E",
         "D",
         "R",
+        "Ctrl+R",
+        "Ctrl+Shift+R",
         // Add/Edit dialog
         "Mode",
         // Config screen

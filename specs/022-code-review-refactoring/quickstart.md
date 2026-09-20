@@ -90,6 +90,15 @@ error (or the existing editor error line does) — and the application
 does not crash or silently continue. Restore permissions afterwards:
 `chmod 755 /tmp/pack-liste-verify/ro`.
 
+**Convergence additions (Phase 9)**:
+
+- Trigger a save failure from the **config screen** (add or edit a
+  modifier with the config dir unwritable): the status line must be
+  visible on the config screen's footer, not only the main screen.
+- After a status message is set, navigate to another screen (Esc) or
+  close a dialog: the message must clear (data-model V3) — it does not
+  persist across the transition.
+
 ## 6. Manual smoke pass (US1, US2, US5)
 
 Launch: `cargo run`

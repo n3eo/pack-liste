@@ -6,6 +6,8 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::ui::hints::{HintSurface, hint_entries, hint_line};
 use crate::ui::state::AppDrawState;
 
+/// Render the raw config file editor with line numbers, the cursor
+/// cell, and the footer (error or hints).
 pub(crate) fn draw_config_editor_screen(
     f: &mut ratatui::prelude::Frame,
     size: Rect,

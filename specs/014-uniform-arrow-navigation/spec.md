@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-20
 
-**Status**: Draft
+**Status**: Implemented (via 016 + 020; closure verified 2026-09-20)
 
 > **Alignment note (2026-09-20, spec 016)**: This spec's model (Up/Down
 > navigate, Left/Right adjust) is implemented by spec 016
@@ -13,6 +13,16 @@
 > field cycles with Left/Right, and the hints/help state the final
 > binding set. The model definition here is satisfied; the remaining
 > difference is scope bookkeeping only.
+
+> **Closure record (2026-09-20, post-020)**: The surface inventory
+> re-run against the running application — every surface compliant:
+> welcome (Up/Down navigate fields, Left/Right adjust values), main
+> lists (Up/Down navigate rows), the add/edit dialog (Up/Down cycle
+> fields / move the category dropdown, Left/Right adjust the
+> category selection and step the quantity — spec 020), the config
+> screen (Up/Down move the modifier cursor), and the raw editor
+> (arrows move the text cursor — the cursor is the value there).
+> No deviations found; the extraction tests pin the binding set.
 
 **Input**: User description:
 "Navigation shall always use up and down

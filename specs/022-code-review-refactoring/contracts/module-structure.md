@@ -76,7 +76,9 @@ These MUST hold after every step, verified by the existing suite:
    pre-selected (V2) — the rename must not alter this.
 6. **Error visibility**: after US5, a forced save/recalculate failure
    is visible to the user (status line) or propagated — never
-   silently discarded (FR-006).
+   silently discarded (FR-006). The status line renders on the main
+   screen and the config screen (Phase 9), and the message clears on
+   screen/mode transitions (data-model V3).
 
 ## Dependency contract (US3/US5)
 

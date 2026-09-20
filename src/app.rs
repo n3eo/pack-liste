@@ -1,6 +1,8 @@
 use anyhow::Result;
 use std::io::{self, IsTerminal};
 
+/// Run the application: start the TUI when stdout is a terminal (or
+/// forced), otherwise print the non-interactive notice.
 pub fn run(force_tui: bool, trip_file: Option<String>) -> Result<()> {
     // Check if we're in a terminal or force TUI mode
     if io::stdout().is_terminal() || force_tui {

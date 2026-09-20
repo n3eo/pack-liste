@@ -4,29 +4,34 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::config::modifiers::ModifiersConfig;
-use crate::models::item::Item;
+use crate::models::item::{Item, QuantityBuffer};
 use crate::models::packing_list::PackingList;
 use crate::models::weekdays::Weekdays;
 
-// Config structure for saving to file
+// The input configuration file's schema (spec 013: strict — every
+// field required as written, unknown fields rejected; the program
+// loads only the current format)
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct AppConfig {
     pub(crate) categories: Vec<String>,
     pub(crate) items: Vec<SavedItem>,
-    #[serde(default)]
     pub(crate) weekdays: u32,
-    #[serde(default = "default_travel_style_name")]
     pub(crate) travel_style: String,
-    #[serde(default = "default_weather_name")]
     pub(crate) weather: String,
-    #[serde(default)]
     pub(crate) modifiers: ModifiersConfig,
     /// Name of the trip file to continue by default
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) last_trip_file: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+/// One item as persisted in the config file: name, category
+/// memberships, the quantity mode (fixed items keep their value),
+/// and the per-item modifiers (spec 010). Strict per spec 013:
+/// `categories` is required; `quantity` is optional-in-format
+/// (automatic items legitimately omit it); unknown fields reject.
 pub(crate) struct SavedItem {
     pub(crate) name: String,
     /// The item's categories; at least one. A legacy single `category:`
@@ -38,72 +43,27 @@ pub(crate) struct SavedItem {
     pub(crate) quantity: Option<u32>,
     /// When false, the quantity is fixed and never recalculated
     pub(crate) auto_quantity: bool,
+    /// The per-day rate (spec 010); absent in pre-feature files,
+    /// loading as the default 1.0
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) rate: Option<f32>,
+    /// The flat reserve buffer (spec 010); absent = no reserve
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reserve: Option<u32>,
+    /// The multiplier buffer (spec 010); absent = no multiplier.
+    /// Exactly one buffer kind is persisted per item (SC-007).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) buffer_multiplier: Option<f32>,
 }
 
-impl<'de> serde::Deserialize<'de> for SavedItem {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        use serde::de::{Error, MapAccess, Visitor};
-
-        struct SavedItemVisitor;
-
-        impl<'de> Visitor<'de> for SavedItemVisitor {
-            type Value = SavedItem;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a saved item mapping")
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<SavedItem, A::Error>
-            where
-                A: MapAccess<'de>,
-            {
-                let mut name: Option<String> = None;
-                let mut categories: Option<Vec<String>> = None;
-                let mut category: Option<String> = None;
-                let mut quantity: Option<u32> = None;
-                let mut auto_quantity = true;
-
-                while let Some(key) = map.next_key::<String>()? {
-                    match key.as_str() {
-                        "name" => name = Some(map.next_value()?),
-                        "categories" => categories = Some(map.next_value()?),
-                        // Legacy single category (pre multi-category format)
-                        "category" => category = Some(map.next_value()?),
-                        "quantity" => quantity = map.next_value()?,
-                        "auto_quantity" => auto_quantity = map.next_value()?,
-                        _ => {
-                            let _: serde_yaml::Value = map.next_value()?;
-                        }
-                    }
-                }
-
-                let name = name.ok_or_else(|| A::Error::missing_field("name"))?;
-                // Prefer the categories list; lift a legacy single category
-                let categories = match categories {
-                    Some(cs) if !cs.is_empty() => cs,
-                    _ => category.map(|c| vec![c]).unwrap_or_default(),
-                };
-
-                Ok(SavedItem {
-                    name,
-                    categories,
-                    quantity,
-                    auto_quantity,
-                })
-            }
-        }
-
-        deserializer.deserialize_map(SavedItemVisitor)
-    }
-}
-
+/// The travel style of a first-run default config (spec 013: this is
+/// the initial value, not a load-time fallback).
 pub(crate) fn default_travel_style_name() -> String {
     "standard".to_string()
 }
 
+/// The weather of a first-run default config (spec 013: the initial
+/// value, not a load-time fallback).
 pub(crate) fn default_weather_name() -> String {
     "mixed".to_string()
 }
@@ -117,6 +77,8 @@ pub(crate) struct TripParams {
     pub(crate) last_trip_file: Option<String>,
 }
 
+/// Load the input config file into a packing list and the trip
+/// parameters; missing optional fields fall back to their defaults.
 pub(crate) fn load_config(config_file: &PathBuf) -> Result<(PackingList, TripParams)> {
     let yaml_content = fs::read_to_string(config_file).context("Failed to read config file")?;
 
@@ -135,6 +97,14 @@ pub(crate) fn load_config(config_file: &PathBuf) -> Result<(PackingList, TripPar
         };
         let mut item = Item::new(saved_item.name, saved_item.categories, fixed_quantity);
         item.auto_quantity = auto;
+        // Per-item modifiers (spec 010): absent fields load as the
+        // defaults (rate 1.0, no buffer) — pre-feature files unchanged
+        item.rate = saved_item.rate.unwrap_or(1.0);
+        item.buffer = match (saved_item.reserve, saved_item.buffer_multiplier) {
+            (Some(n), None) => QuantityBuffer::Reserve(n),
+            (None, Some(m)) => QuantityBuffer::Multiplier(m),
+            _ => QuantityBuffer::None,
+        };
         packing_list.add_item(item);
     }
 
@@ -150,6 +120,8 @@ pub(crate) fn load_config(config_file: &PathBuf) -> Result<(PackingList, TripPar
     Ok((packing_list, trip_params))
 }
 
+/// Create the default config file (built-in items and modifiers) and
+/// return the packing list and trip parameters built from it.
 pub(crate) fn create_default_config(config_file: &PathBuf) -> Result<(PackingList, TripParams)> {
     // Create default packing list
     let mut packing_list = PackingList::new();
@@ -211,6 +183,9 @@ pub(crate) fn create_default_config(config_file: &PathBuf) -> Result<(PackingLis
                     categories: item.categories.clone(),
                     quantity: if auto { None } else { Some(item.quantity) },
                     auto_quantity: auto,
+                    rate: None,
+                    reserve: None,
+                    buffer_multiplier: None,
                 }
             })
             .collect(),

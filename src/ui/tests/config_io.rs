@@ -14,6 +14,7 @@ fn multi_category_reconcile_matches_any_membership() {
             name: "Knife".to_string(),
             category: "Kitchen".to_string(),
             packed: true,
+            quantity: 1,
         }],
     };
     // The catalog item "Knife" moved to a new category set; the trip
@@ -30,25 +31,6 @@ fn multi_category_reconcile_matches_any_membership() {
 }
 
 #[test]
-fn old_config_without_trip_params_loads() {
-    // Config files written before the modifiers feature only had
-    // categories and items; they must keep loading with defaults
-    let yaml =
-        "categories:\n- Clothing\nitems:\n- name: T-Shirt\n  category: Clothing\n  quantity: 5\n";
-    let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
-    assert_eq!(config.items.len(), 1);
-    assert_eq!(config.items[0].name, "T-Shirt");
-    // Old quantity is ignored for auto items; the item recalculates
-    assert!(config.items[0].auto_quantity);
-    assert_eq!(config.items[0].quantity, Some(5)); // kept on load, unused for auto
-    assert_eq!(config.weekdays, 0); // serde default, clamped to Weekdays default on load
-    assert_eq!(config.travel_style, "standard");
-    assert_eq!(config.weather, "mixed");
-    assert!(!config.modifiers.travel_styles.is_empty());
-    assert!(!config.modifiers.weather.is_empty());
-}
-
-#[test]
 fn full_config_round_trips() {
     let config = AppConfig {
         categories: vec!["Clothing".to_string()],
@@ -58,12 +40,18 @@ fn full_config_round_trips() {
                 categories: vec!["Clothing".to_string()],
                 quantity: None,
                 auto_quantity: true,
+                rate: None,
+                reserve: None,
+                buffer_multiplier: None,
             },
             SavedItem {
                 name: "Toothbrush".to_string(),
                 categories: vec!["Toiletries".to_string()],
                 quantity: Some(1),
                 auto_quantity: false,
+                rate: None,
+                reserve: None,
+                buffer_multiplier: None,
             },
         ],
         weekdays: 10,
@@ -101,6 +89,9 @@ fn auto_quantities_are_not_persisted() {
             categories: vec!["Clothing".to_string()],
             quantity: None,
             auto_quantity: true,
+            rate: None,
+            reserve: None,
+            buffer_multiplier: None,
         }],
         weekdays: 7,
         travel_style: "standard".to_string(),
@@ -130,11 +121,13 @@ fn trip_file_round_trips_and_reconciles() {
                 name: "T-Shirt".to_string(),
                 category: "Clothing".to_string(),
                 packed: true,
+                quantity: 1,
             },
             TripItem {
                 name: "Old Item".to_string(),
                 category: "Gone".to_string(),
                 packed: false,
+                quantity: 1,
             },
         ],
     };
@@ -160,34 +153,6 @@ fn trip_file_round_trips_and_reconciles() {
 }
 
 #[test]
-fn legacy_files_with_activity_fields_load_and_save_clean() {
-    // US3/SC-003: pre-feature files carrying activity fields load
-    // without error (serde ignores unknown fields); US3/SC-004: new
-    // saves contain no activity keys
-    let legacy_config = "categories:\n- Clothing\nitems:\n- name: T-Shirt\n  categories:\n  - Clothing\n  auto_quantity: true\nweekdays: 7\ntravel_style: standard\nweather: mixed\nselected_activities:\n- hiking\nmodifiers:\n  travel_styles:\n  - name: standard\n    multiplier: 1.0\n  weather:\n  - name: mixed\n    multiplier: 1.0\n  activities:\n  - name: hiking\n    multiplier: 1.5\n";
-    let config: AppConfig = serde_yaml::from_str(legacy_config).unwrap();
-    assert_eq!(config.items.len(), 1);
-    assert_eq!(config.weekdays, 7);
-
-    let legacy_trip = "weekdays: 7\ntravel_style: standard\nweather: mixed\nselected_activities:\n- hiking\nitems:\n- name: T-Shirt\n  category: Clothing\n  packed: true\n";
-    let trip: crate::config::trip_file::TripFile = serde_yaml::from_str(legacy_trip).unwrap();
-    assert_eq!(trip.items.len(), 1);
-    assert!(trip.items[0].packed);
-
-    // Serialized output contains no activity keys (SC-004)
-    let config_yaml = serde_yaml::to_string(&config).unwrap();
-    assert!(
-        !config_yaml.contains("activit"),
-        "config save must not contain activity fields: {config_yaml}"
-    );
-    let trip_yaml = serde_yaml::to_string(&trip).unwrap();
-    assert!(
-        !trip_yaml.contains("activit"),
-        "trip save must not contain activity fields: {trip_yaml}"
-    );
-}
-
-#[test]
 fn trip_paths_resolve_relative_absolute_and_tilde() {
     // Relative names resolve against the current working directory
     let cwd = std::env::current_dir().unwrap();
@@ -210,4 +175,158 @@ fn trip_paths_resolve_relative_absolute_and_tilde() {
         home.join("my-trip.yaml")
     );
     assert_eq!(resolve_trip_path("~"), home);
+}
+
+// ---- Spec 010: per-item modifier persistence ----
+
+#[test]
+fn rate_and_reserve_round_trip() {
+    let config = AppConfig {
+        categories: vec!["Clothing".to_string()],
+        items: vec![SavedItem {
+            name: "Underwear".to_string(),
+            categories: vec!["Clothing".to_string()],
+            quantity: None,
+            auto_quantity: true,
+            rate: Some(1.0),
+            reserve: Some(2),
+            buffer_multiplier: None,
+        }],
+        weekdays: 5,
+        travel_style: "standard".to_string(),
+        weather: "mixed".to_string(),
+        modifiers: ModifiersConfig::default(),
+        last_trip_file: None,
+    };
+    let yaml = serde_yaml::to_string(&config).unwrap();
+    let parsed: AppConfig = serde_yaml::from_str(&yaml).unwrap();
+    assert_eq!(parsed.items[0].rate, Some(1.0));
+    assert_eq!(parsed.items[0].reserve, Some(2));
+    assert_eq!(parsed.items[0].buffer_multiplier, None);
+    // Exactly one buffer kind on the wire (SC-007)
+    assert!(yaml.contains("reserve: 2"));
+    assert!(!yaml.contains("buffer_multiplier"));
+}
+
+#[test]
+fn rate_and_multiplier_round_trip() {
+    let config = AppConfig {
+        categories: vec![],
+        items: vec![SavedItem {
+            name: "Socks".to_string(),
+            categories: vec!["Clothing".to_string()],
+            quantity: None,
+            auto_quantity: true,
+            rate: Some(1.0),
+            reserve: None,
+            buffer_multiplier: Some(1.25),
+        }],
+        weekdays: 5,
+        travel_style: "standard".to_string(),
+        weather: "mixed".to_string(),
+        modifiers: ModifiersConfig::default(),
+        last_trip_file: None,
+    };
+    let yaml = serde_yaml::to_string(&config).unwrap();
+    let parsed: AppConfig = serde_yaml::from_str(&yaml).unwrap();
+    assert_eq!(parsed.items[0].buffer_multiplier, Some(1.25));
+    assert_eq!(parsed.items[0].reserve, None);
+    assert!(yaml.contains("buffer_multiplier: 1.25"));
+    assert!(!yaml.contains("reserve:"));
+}
+
+// ---- Spec 012: quantities in the trip file ----
+
+#[test]
+fn trip_file_round_trips_with_quantities() {
+    use crate::config::trip_file::{TripFile, TripItem};
+    let trip = TripFile {
+        weekdays: 7,
+        travel_style: "standard".to_string(),
+        weather: "mixed".to_string(),
+        items: vec![TripItem {
+            name: "T-Shirt".to_string(),
+            category: "Clothing".to_string(),
+            packed: true,
+            quantity: 5,
+        }],
+    };
+    let yaml = serde_yaml::to_string(&trip).unwrap();
+    assert!(yaml.contains("quantity: 5"), "quantity on the wire: {yaml}");
+    let parsed: TripFile = serde_yaml::from_str(&yaml).unwrap();
+    assert_eq!(parsed.items[0].quantity, 5);
+}
+
+#[test]
+fn reconcile_preserves_quantities() {
+    // EC-002: quantities survive reconciliation
+    use crate::config::trip_file::{TripFile, TripItem};
+    let mut trip = TripFile {
+        weekdays: 7,
+        travel_style: "standard".to_string(),
+        weather: "mixed".to_string(),
+        items: vec![
+            TripItem {
+                name: "Knife".to_string(),
+                category: "Old".to_string(),
+                packed: true,
+                quantity: 3,
+            },
+            TripItem {
+                name: "Gone".to_string(),
+                category: "Nowhere".to_string(),
+                packed: false,
+                quantity: 9,
+            },
+        ],
+    };
+    let config_items = vec![(
+        "Knife".to_string(),
+        vec!["Cooking".to_string(), "Gear".to_string()],
+    )];
+    trip.reconcile(&config_items);
+    assert_eq!(trip.items.len(), 1); // the gone item dropped
+    assert_eq!(trip.items[0].quantity, 3); // the survivor kept it
+    assert_eq!(trip.items[0].category, "Cooking"); // remapped
+}
+
+// ---- Spec 013: strict formats ----
+
+#[test]
+fn current_format_config_loads() {
+    let yaml = "categories:\n- Clothing\nitems:\n- name: T-Shirt\n  categories:\n  - Clothing\n  auto_quantity: true\nweekdays: 7\ntravel_style: standard\nweather: mixed\nmodifiers:\n  travel_styles:\n  - name: standard\n    multiplier: 1.0\n  weather:\n  - name: mixed\n    multiplier: 1.0\n";
+    let config: AppConfig = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(config.items.len(), 1);
+    assert_eq!(config.weekdays, 7);
+}
+
+#[test]
+fn config_missing_a_required_field_fails() {
+    // No weekdays key: the strict format rejects the file
+    let yaml = "categories:\n- Clothing\nitems: []\ntravel_style: standard\nweather: mixed\nmodifiers:\n  travel_styles: []\n  weather: []\n";
+    let result: Result<AppConfig, _> = serde_yaml::from_str(yaml);
+    assert!(result.is_err(), "a missing required field must fail");
+}
+
+#[test]
+fn config_with_unknown_field_fails() {
+    // EC-002: unknown fields mean the file is not in the current format
+    let yaml = "categories: []\nitems: []\nweekdays: 7\ntravel_style: standard\nweather: mixed\nmodifiers:\n  travel_styles: []\n  weather: []\nsome_legacy_key: 1\n";
+    let result: Result<AppConfig, _> = serde_yaml::from_str(yaml);
+    assert!(result.is_err(), "an unknown field must fail");
+}
+
+#[test]
+fn trip_file_missing_a_field_fails() {
+    let yaml = "weekdays: 7\ntravel_style: standard\nweather: mixed\n";
+    let result: Result<crate::config::trip_file::TripFile, _> = serde_yaml::from_str(yaml);
+    assert!(result.is_err(), "a trip file without items must fail");
+}
+
+#[test]
+fn trip_item_requires_quantity() {
+    // Post-013 the quantity is required on the wire
+    let yaml = "weekdays: 7\ntravel_style: standard\nweather: mixed\nitems:\n- name: A\n  category: C\n  packed: false\n";
+    let result: Result<crate::config::trip_file::TripFile, _> = serde_yaml::from_str(yaml);
+    assert!(result.is_err(), "a trip item without quantity must fail");
 }

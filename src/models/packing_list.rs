@@ -10,10 +10,12 @@ pub(crate) struct PackingList {
 }
 
 impl PackingList {
+    /// Create an empty packing list.
     pub(crate) fn new() -> Self {
         Self { items: Vec::new() }
     }
 
+    /// Append an item to the list.
     pub(crate) fn add_item(&mut self, item: Item) {
         self.items.push(item);
     }

@@ -10,23 +10,28 @@ use std::path::Path;
 /// continued later. The file is human-readable YAML and can be edited by
 /// hand; on load it is reconciled against the current input config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct TripFile {
     /// Trip parameters at the time of the last save
     pub(crate) weekdays: u32,
     pub(crate) travel_style: String,
     pub(crate) weather: String,
-    /// The compiled packing list: selected items with packed state.
-    /// Quantities are not persisted; they are recalculated on load.
-    #[serde(default)]
+    /// The compiled packing list: selected items with packed state
+    /// and quantities (spec 012). Strict per spec 013: required.
     pub(crate) items: Vec<TripItem>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+/// One selected item in the persisted trip file, with its packed state
+/// and quantity. Strict per spec 013: every field required.
 pub(crate) struct TripItem {
     pub(crate) name: String,
     pub(crate) category: String,
-    #[serde(default)]
     pub(crate) packed: bool,
+    /// The item's quantity at save time (spec 012): the trip file is a
+    /// complete snapshot.
+    pub(crate) quantity: u32,
 }
 
 impl TripFile {

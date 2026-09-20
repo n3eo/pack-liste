@@ -119,7 +119,9 @@ continues it.
 - **V2**: `Item.selected` (formerly `editable`) defaults to `true` for
   all items on a new/empty list (spec 015 behavior, preserved).
 - **V3**: The status line shows the most recent unsurfaced error and
-  does not persist across a mode change (cleared on transition).
+  does not persist across a mode change (cleared on transition). It is
+  rendered on every screen that can raise a save/recalculate failure:
+  the main screen and the config screen (Phase 9 refinement of R6).
 - **V4**: Removing `chrono`, `tracing`, `tracing-subscriber`, and
   `mockall` leaves `cargo build` and `cargo test` green; `Cargo.lock`
   is updated only via `cargo` itself.

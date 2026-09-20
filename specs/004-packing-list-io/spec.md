@@ -17,6 +17,12 @@
 > separate in-app list name or a JSON export/import command; the trip file
 > itself is the shareable, hand-editable artifact.
 
+> **Supersession note (spec 013)**: The program loads only the
+> current file format. Any requirement here that demands loading files
+> written by earlier versions is superseded by spec 013 (remove
+> version-compatibility code): old files are regenerated or
+> hand-edited per the documented current format, never migrated.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Identify a Trip by Its File (Priority: P1)

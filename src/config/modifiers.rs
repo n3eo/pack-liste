@@ -29,6 +29,7 @@ impl Default for ModifiersConfig {
 }
 
 impl ModifiersConfig {
+    /// The multiplier configured for the named travel style, if any.
     pub(crate) fn travel_style_multiplier(&self, name: &str) -> Option<f32> {
         self.travel_styles
             .iter()
@@ -36,6 +37,7 @@ impl ModifiersConfig {
             .map(|m| m.multiplier)
     }
 
+    /// The multiplier configured for the named weather condition, if any.
     pub(crate) fn weather_multiplier(&self, name: &str) -> Option<f32> {
         self.weather
             .iter()

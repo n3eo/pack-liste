@@ -155,8 +155,10 @@ impl App {
             }
         }
 
+        // Applying the raw config updates the in-memory configuration
+        // but recalculates nothing (spec 018 EC-008); the user presses
+        // a recalculate key to bring quantities in line
         self.reconcile_selections();
-        self.update_quantities()?;
         self.draw_state.config_editor_error = None;
         self.draw_state.screen = self.draw_state.previous_screen;
         Ok(())

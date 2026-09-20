@@ -26,6 +26,8 @@ impl App {
         }
     }
 
+    /// Key handling of the config screen: the modifier editor when
+    /// open, else section navigation and modifier add/edit/delete.
     pub(crate) fn handle_config_screen_input(&mut self, key: KeyEvent) -> Result<bool> {
         // Modifier editor is open: route all keys to it
         if let Some(editor) = self.draw_state.modifier_editor.as_mut() {
@@ -62,10 +64,10 @@ impl App {
                                 });
                             }
                         }
-                        // Keep the current selections valid
+                        // Keep the current selections valid; quantities
+                        // recalculate only on the explicit keys (018)
                         self.reconcile_selections();
                         self.save_config_or_report();
-                        self.update_quantities()?;
                     }
                 }
                 KeyCode::Backspace => match editor.field {
@@ -154,7 +156,6 @@ impl App {
                     }
                     self.reconcile_selections();
                     self.save_config_or_report();
-                    self.update_quantities()?;
                 }
             }
             _ => {}

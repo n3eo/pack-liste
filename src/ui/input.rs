@@ -10,6 +10,7 @@ use std::io::{self, stdout};
 use std::path::PathBuf;
 
 use crate::config::trip_file::{TripFile, TripItem};
+use crate::models::item::QuantityBuffer;
 use crate::models::weekdays::Weekdays;
 use crate::quantity::calculation::QuantityCalculation;
 use crate::ui::config_io::{
@@ -17,9 +18,12 @@ use crate::ui::config_io::{
 };
 use crate::ui::handlers;
 use crate::ui::state::{
-    AppDrawState, AppState, ConfigSection, Focus, FocusSide, InputMode, Screen, StatusKind,
+    AppDrawState, AppState, ConfigSection, Focus, FocusSide, InputMode, RecalculateScope, Screen,
+    StatusKind,
 };
 
+/// The application: owns the terminal, the draw state, the quantity
+/// calculation, and the config path; runs the draw/input loop.
 pub struct App {
     pub(crate) state: AppState,
     pub(crate) terminal: Terminal<CrosstermBackend<io::Stdout>>,
@@ -29,6 +33,8 @@ pub struct App {
 }
 
 impl App {
+    /// Initialize the terminal, load (or create) the config, load the
+    /// trip file when a path is given, and calculate the quantities.
     pub fn new(trip_file_arg: Option<String>) -> Result<Self> {
         // Initialize terminal
         enable_raw_mode().context("Failed to enable raw mode")?;
@@ -46,7 +52,10 @@ impl App {
 
         let config_file = config_path.join("config.yaml");
 
-        // Load or create default config
+        // Load or create default config. A missing file means first
+        // run (created fresh, EC-001 of spec 013); an existing file
+        // that fails to load exits with the error — never silently
+        // substituted (EC-003).
         let (mut packing_list, trip_params) = if config_file.exists() {
             load_config(&config_file)?
         } else {
@@ -74,8 +83,10 @@ impl App {
         let mut weather = trip_params.weather;
 
         // Load and reconcile the trip file if a path is set
+        let mut resumed = false;
         if !trip_file_path.as_os_str().is_empty() {
             if let Some(mut trip) = TripFile::load(&trip_file_path)? {
+                resumed = true;
                 // Reconcile selected items against the current input config
                 let config_items: Vec<(String, Vec<String>)> = packing_list
                     .items
@@ -89,7 +100,9 @@ impl App {
                 travel_style = trip.travel_style;
                 weather = trip.weather;
 
-                // Reset the default selection, then restore from the file
+                // Reset the default selection, then restore from the
+                // file — including the saved quantities (spec 012):
+                // the file is authoritative for its own trip
                 for item in &mut packing_list.items {
                     item.selected = false;
                     item.packed = false;
@@ -100,6 +113,7 @@ impl App {
                     {
                         item.selected = true;
                         item.packed = t.packed;
+                        item.quantity = t.quantity;
                     }
                 }
             } else {
@@ -130,6 +144,7 @@ impl App {
             collapsed_categories: Vec::new(),
             selected_index: 0,
             focus_side: FocusSide::Left,
+            fullscreen: false,
             input_mode: InputMode::Normal,
             left_scroll: 0,
             right_scroll: 0,
@@ -158,12 +173,17 @@ impl App {
             config_path: config_file,
         };
 
-        // Initialize quantities
-        app.update_quantities()?;
+        // Initialize quantities: a fresh list calculates once; a resumed
+        // trip keeps the quantities restored from its file (spec 012 —
+        // the file is authoritative for its own trip)
+        if !resumed {
+            app.update_quantities()?;
+        }
 
         Ok(app)
     }
 
+    /// Serialize the current state to the config file.
     pub(crate) fn save_config(&self) -> Result<()> {
         let config = AppConfig {
             categories: self.get_all_categories(),
@@ -179,6 +199,18 @@ impl App {
                         categories: item.categories.clone(),
                         quantity: if auto { None } else { Some(item.quantity) },
                         auto_quantity: auto,
+                        // Per-item modifiers (spec 010): the rate is
+                        // written when it differs from the default; the
+                        // buffer writes exactly one kind (SC-007)
+                        rate: (item.rate != 1.0).then_some(item.rate),
+                        reserve: match item.buffer {
+                            QuantityBuffer::Reserve(n) => Some(n),
+                            _ => None,
+                        },
+                        buffer_multiplier: match item.buffer {
+                            QuantityBuffer::Multiplier(m) => Some(m),
+                            _ => None,
+                        },
                     }
                 })
                 .collect(),
@@ -230,6 +262,9 @@ impl App {
                     name: item.name.clone(),
                     category: item.primary_category().to_string(),
                     packed: item.packed,
+                    // The quantity snapshot (spec 012): whatever the
+                    // user sees — calculated, fixed, or manually set
+                    quantity: item.quantity,
                 })
                 .collect(),
         };
@@ -244,9 +279,11 @@ impl App {
         self.draw_state.trip_file_path = path.clone();
         self.draw_state.editing_trip_file = false;
 
-        // Load the trip file if it exists; a missing file means a new trip
+        // Load the trip file if it exists; a missing file means a new
+        // trip: select everything and calculate once (FR-008's fresh
+        // list). An existing trip restores its saved quantities below
+        // without recalculating (spec 012/018).
         let Some(mut trip) = TripFile::load(&path)? else {
-            // A new trip starts with every item selected
             select_all_items(&mut self.draw_state.packing_list);
             return self.update_quantities();
         };
@@ -266,7 +303,9 @@ impl App {
         self.draw_state.travel_style = trip.travel_style;
         self.draw_state.weather = trip.weather;
 
-        // Reset the previous trip's selection, then restore from the file
+        // Reset the previous trip's selection, then restore from the
+        // file — including the saved quantities (spec 012); no
+        // recalculation on resume: the file is authoritative
         for item in &mut self.draw_state.packing_list.items {
             item.selected = false;
             item.packed = false;
@@ -277,10 +316,11 @@ impl App {
             {
                 item.selected = true;
                 item.packed = t.packed;
+                item.quantity = t.quantity;
             }
         }
 
-        self.update_quantities()
+        Ok(())
     }
 
     /// All distinct item categories, sorted.
@@ -323,6 +363,8 @@ impl App {
         }
     }
 
+    /// Recalculate every automatic item's quantity from the current
+    /// trip parameters.
     pub(crate) fn update_quantities(&mut self) -> Result<()> {
         self.draw_state
             .recalculate_quantities(&self.quantity_calculation)
@@ -339,15 +381,27 @@ impl App {
         }
     }
 
-    /// Recalculate quantities; on failure show the error in the status
-    /// line instead of discarding it (the session continues).
-    pub(crate) fn update_quantities_or_report(&mut self) {
-        if let Err(e) = self.update_quantities() {
-            self.draw_state
-                .set_status(StatusKind::Error, format!("Recalculate failed: {e}"));
-        } else {
-            self.draw_state.clear_status();
-        }
+    /// Run an explicit recalculate action in the given scope (spec
+    /// 018): resolve the scope against the cursor when needed, then
+    /// recalculate; failures surface in the status line.
+    pub(crate) fn recalculate_current_scope(&mut self, scope: RecalculateScope) -> Result<()> {
+        // On a category header, the item scope means the header's
+        // category (EC-001: R and Ctrl+R are equivalent there)
+        let scope = match scope {
+            RecalculateScope::Item(idx) => match self.draw_state.packing_list.items.get(idx) {
+                Some(item) => {
+                    if self.draw_state.cursor_item_index().is_some() {
+                        RecalculateScope::Item(idx)
+                    } else {
+                        RecalculateScope::Category(item.primary_category().to_string())
+                    }
+                }
+                None => return Ok(()),
+            },
+            other => other,
+        };
+        self.draw_state
+            .recalculate_quantities_scoped(&self.quantity_calculation, scope)
     }
 
     /// Adjust the trip length by `direction` days, clamped to the valid
@@ -358,8 +412,9 @@ impl App {
             && target <= Weekdays::MAX as i32
             && let Ok(new_weekdays) = Weekdays::new(target as u32)
         {
+            // Parameters change; quantities recalculate only on the
+            // explicit recalculate keys (spec 018, amended)
             self.draw_state.weekdays = new_weekdays;
-            self.update_quantities()?;
         }
         Ok(())
     }
@@ -384,6 +439,8 @@ impl App {
         }
     }
 
+    /// The main loop: draw, handle input, repeat until exit; saves the
+    /// config and trip file on every exit path.
     pub fn run(&mut self) -> Result<()> {
         while let AppState::Running = self.state {
             self.draw()?;
@@ -462,6 +519,36 @@ impl App {
             return Ok(false);
         }
 
+        // The recalculate chords (spec 018): Ctrl+R = the current
+        // item's category, Ctrl+Shift+R = everything; matched before
+        // the plain R arm in the main-screen handler. Main screen,
+        // normal mode only (EC-006).
+        if self.draw_state.screen == Screen::Main
+            && matches!(self.draw_state.input_mode, InputMode::Normal)
+            && key.modifiers.contains(M::CONTROL)
+            && matches!(key.code, K::Char('r') | K::Char('R'))
+        {
+            let scope = if key.modifiers.contains(M::SHIFT) {
+                RecalculateScope::All
+            } else {
+                // The cursor's item's category; on a header, the
+                // header's own category (EC-001)
+                match self.current_item_index() {
+                    Some(idx) => RecalculateScope::Category(
+                        self.draw_state.packing_list.items[idx]
+                            .primary_category()
+                            .to_string(),
+                    ),
+                    None => match self.current_category() {
+                        Some(c) => RecalculateScope::Category(c),
+                        None => return Ok(false),
+                    },
+                }
+            };
+            self.recalculate_current_scope(scope)?;
+            return Ok(false);
+        }
+
         // Esc: leave the current screen/mode or quit
         if key.code == K::Esc {
             return self.handle_escape();
@@ -474,7 +561,8 @@ impl App {
                 InputMode::Normal => handlers::welcome::handle_main_input(self, key),
                 InputMode::AddingItem { .. }
                 | InputMode::EditingItem { .. }
-                | InputMode::ConfirmDelete { .. } => {
+                | InputMode::ConfirmDelete { .. }
+                | InputMode::ConfirmEdit { .. } => {
                     handlers::welcome::handle_dialog_input(self, key)
                 }
             },
@@ -491,6 +579,8 @@ impl App {
 
     /// Esc semantics per screen and mode.
     fn handle_escape(&mut self) -> Result<bool> {
+        // A status message does not persist across a transition (V3)
+        self.draw_state.clear_status();
         match self.draw_state.screen {
             Screen::Welcome => {
                 self.state = AppState::Exit;
@@ -517,7 +607,8 @@ impl App {
                     }
                     InputMode::AddingItem { .. }
                     | InputMode::EditingItem { .. }
-                    | InputMode::ConfirmDelete { .. } => {
+                    | InputMode::ConfirmDelete { .. }
+                    | InputMode::ConfirmEdit { .. } => {
                         // Cancel adding/editing/confirming
                         self.draw_state.input_mode = InputMode::Normal;
                         Ok(false)
@@ -527,6 +618,8 @@ impl App {
         }
     }
 
+    /// Move the cursor up one row and keep the left panel in sync
+    /// when navigating the final list.
     pub(crate) fn handle_up(&mut self) -> Result<()> {
         self.draw_state.move_cursor_up();
         // Keep the left panel in sync when navigating the final list
@@ -539,6 +632,8 @@ impl App {
         Ok(())
     }
 
+    /// Move the cursor down one row and keep the left panel in sync
+    /// when navigating the final list.
     pub(crate) fn handle_down(&mut self) -> Result<()> {
         self.draw_state.move_cursor_down();
         // Keep the left panel in sync when navigating the final list
@@ -561,18 +656,23 @@ impl App {
         self.draw_state.cursor_category()
     }
 
+    /// Toggle collapse of the category under the cursor.
     pub(crate) fn toggle_category_collapse(&mut self) {
         self.draw_state.toggle_category_collapse();
     }
 
+    /// Toggle selection of the item under the cursor.
     pub(crate) fn toggle_item_selection(&mut self) {
         self.draw_state.toggle_item_selection();
     }
 
+    /// Toggle selection of the cursor's whole category.
     pub(crate) fn toggle_category_selection(&mut self) {
         self.draw_state.toggle_category_selection();
     }
 
+    /// Toggle the packed state of the item under the cursor (right
+    /// panel only).
     pub(crate) fn toggle_item_packed_right_side(&mut self) {
         self.draw_state.toggle_item_packed();
     }

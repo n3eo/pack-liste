@@ -15,6 +15,8 @@ fn capitalize_first(s: &str) -> String {
     }
 }
 
+/// Render the welcome screen: the trip file field, trip parameters,
+/// hints, and the resume prompt when a remembered trip exists.
 pub(crate) fn draw_welcome_screen(
     f: &mut ratatui::prelude::Frame,
     size: Rect,
@@ -47,7 +49,7 @@ pub(crate) fn draw_welcome_screen(
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
-            Constraint::Min(3),
+            Constraint::Length(3),
         ])
         .split(content_area);
 
@@ -82,7 +84,12 @@ pub(crate) fn draw_welcome_screen(
         let shown = if state.trip_file_path.as_os_str().is_empty() {
             "(required - set a path to persist your packing list)".dim()
         } else {
-            state.trip_file_path.display().to_string().into()
+            // Long paths truncate with a visible indicator (spec 006,
+            // US1/AC3) — the block's inner width bounds the text
+            let inner_width = inner(params_layout[0]).width as usize;
+            let path = state.trip_file_path.display().to_string();
+            let shown = crate::ui::screens::main::truncate_row_text(&path, " ", "", inner_width);
+            Span::raw(shown)
         };
         vec![
             Line::from(vec![Span::raw(" "), shown]),

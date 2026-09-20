@@ -36,6 +36,13 @@ or another modifier like 1.25, only support either or"
 > item**: an item has either a flat reserve or a buffer multiplier, never
 > both. The user's own words: "only support either or."
 
+> **Supersession note (spec 013)**: FR-008's pre-feature-file
+> loading (absent modifiers read as defaults) is superseded by spec
+> 013: the program loads only the current format. The modifier fields
+> remain optional-in-format because the *current* format legitimately
+> omits them for default items — that is a format rule, not
+> compatibility.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Per-Item Quantity Modifiers (Priority: P1)

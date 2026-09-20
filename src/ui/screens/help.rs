@@ -4,6 +4,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::ui::help::help_content;
 
+/// Render the help screen listing every binding.
 pub(crate) fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
     let block = Block::default()
         .title("Help - Navigation & Controls")

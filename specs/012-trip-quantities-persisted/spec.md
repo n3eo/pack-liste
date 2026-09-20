@@ -18,6 +18,11 @@
 > trip. The input configuration file (config.yaml) is not affected; it
 > keeps storing only fixed quantities, as before.
 
+> **Supersession note (spec 013)**: EC-001's pre-feature trip
+> file loading (missing quantities calculated) is superseded by spec
+> 013: the quantity field is required in the current trip file format;
+> old files are regenerated or hand-edited per the documented format.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Quantities are saved to the trip file (Priority: P1)
