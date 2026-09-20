@@ -32,3 +32,8 @@
 ## Notes
 
 - All checklist items have passed validation. The specification is ready for the next phase (`/speckit.clarify` or `/speckit.plan`).
+
+## Alignment Review (2026-09-20)
+
+- [x] Spec reviewed against the implemented application and updated to describe shipped behavior (see the alignment note at the top of spec.md).
+- [x] All checklist items re-validated after the alignment update.

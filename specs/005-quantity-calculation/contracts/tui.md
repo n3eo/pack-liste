@@ -155,3 +155,10 @@ The application state includes:
 │ Packed: 2/9 | Remaining: 7 | Progress: 22%                  │
 └───────────────────────────────────────────────────────────────┘
 ```
+
+> **Alignment note (2026-09-20)**: This contract predates the shipped
+> implementation and is superseded. Trip parameters are entered on the
+> welcome/trip-setup screen (Up/Down navigate, Left/Right adjust values),
+> not on the main screen. Selection uses Space (not Enter); the application
+> quits with q or Esc (not Ctrl+Q). See the help screen in the application
+> for the shipped key bindings.

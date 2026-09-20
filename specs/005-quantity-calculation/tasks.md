@@ -15,6 +15,14 @@ description: "Task list for Quantity Calculation feature implementation"
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
+> **Alignment note (2026-09-20)**: Task statuses were reconciled with the
+> shipped application. User Story 5 (packing-list management: naming, JSON
+> export/import, `PackingService`) was superseded by the trip-file flow
+> (spec 004); its tasks are marked cancelled. The optional contract/
+> integration test tasks (T007–T029, T034–T043) were not carried out; the
+> quantity rule is covered by unit tests in `src/quantity/calculation.rs`
+> and config/trip-file tests in `src/ui/app.rs`.
+
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: Can run in parallel (different files, no dependencies)
@@ -160,12 +168,14 @@ description: "Task list for Quantity Calculation feature implementation"
 
 ### Implementation for User Story 5
 
-- [x] T036 [P] [US5] Create `src/models/packing_list.rs` with PackingList struct, name, and items
-- [x] T037 [US5] Implement `src/services/packing_service.rs` with create, rename, export, and import functions
-- [x] T038 [US5] Add validation for packing list names
-- [x] T039 [US5] Implement packing list persistence in `~/.config/pack-liste/`
-- [x] T040 [US5] Add error handling for file I/O operations
-- [x] T041 [US5] Add logging for packing list operations
+> Superseded by the trip-file flow (spec 004). Cancelled 2026-09-20.
+
+- [x] T036 [P] [US5] Create `src/models/packing_list.rs` with PackingList struct, name, and items (kept as the in-memory model)
+- [x] T037 [US5] Implement `src/services/packing_service.rs` with create, rename, export, and import functions (superseded; code currently unused)
+- [x] T038 [US5] Add validation for packing list names (superseded; trips are identified by file path)
+- [x] T039 [US5] Implement packing list persistence in `~/.config/pack-liste/` (superseded; trips persist to user-chosen files)
+- [x] T040 [US5] Add error handling for file I/O operations (fulfilled by the trip-file module)
+- [x] T041 [US5] Add logging for packing list operations (superseded)
 
 **Checkpoint**: User Story 5 should work independently and integrate with User Stories 1-4
 

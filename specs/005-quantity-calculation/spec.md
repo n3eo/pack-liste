@@ -4,31 +4,20 @@
 
 **Created**: 2026-09-19
 
-**Status**: Draft
+**Status**: Implemented
 
 **Input**: User description:
 Update the quantity calculation implementation to consider the input week days, and weigh based on travel style, weather input, activities, ...
 
+> **Alignment note (2026-09-20)**: This spec was reviewed against the implemented
+> application and updated to describe the shipped behavior. The original spec
+> bundled packing-list management (naming, JSON export/import, storage under
+> `~/.config/pack-liste/`); those concerns moved to spec 004 (trip files,
+> path-identified, human-readable YAML). This spec now covers only the quantity
+> calculation itself. The calculation is deterministic; conflicting inputs
+> (activities vs. weather) are resolved by rule, without a user-facing warning.
+
 ## User Scenarios & Testing *(mandatory)*
-
-### User Story 5 - Packing List Management (Priority: P2)
-
-The user can manage packing lists, including creating, selecting, renaming, exporting, and importing packing lists. The system ensures that all packing lists are stored persistently in `~/.config/pack-liste/` and can be retrieved for future trips.
-
-**Why this priority**: Packing list management is essential for users who want to save and reuse their packing configurations across multiple trips.
-
-**Independent Test**: This story can be tested independently by creating, renaming, exporting, and importing packing lists.
-
-**Acceptance Scenarios**:
-
-1. **Given** the user creates a new packing list, **When** the system processes the request, **Then** a new empty packing list is created with a default name (e.g., "Unnamed Packing List - <timestamp>").
-2. **Given** the user renames a packing list to "Summer Trip 2026", **When** the system processes the request, **Then** the packing list name is updated to "Summer Trip 2026" and persists across sessions.
-3. **Given** the user exports the packing list to a file named "summer_trip.json", **When** the system processes the request, **Then** the packing list is saved to `~/.config/pack-liste/summer_trip.json` with all selected items, their quantities, and the packing list name.
-4. **Given** the user imports a packing list from "summer_trip.json", **When** the system processes the request, **Then** the packing list is loaded from the file and displayed in the UI with all items and their quantities.
-5. **Given** the user selects an existing packing list named "Winter Gear", **When** the system processes the request, **Then** the selected packing list is loaded and displayed in the UI with all items and their quantities.
-6. **Given** the user tries to import a packing list with an invalid name (e.g., empty or >50 characters), **When** the system processes the request, **Then** an error message is displayed and the import is aborted.
-
----
 
 ### User Story 1 - Calculate Quantities Based on Weekdays (Priority: P1)
 
@@ -40,11 +29,9 @@ The user inputs the number of weekdays for their trip (e.g., 5 weekdays). The sy
 
 **Acceptance Scenarios**:
 
-1. **Given** the user inputs 3 weekdays, **When** the packing list is generated, **Then** the quantities of items (e.g., "T-shirts") are adjusted to reflect a 3-day trip.
+1. **Given** the user inputs 3 weekdays, **When** the packing list is generated, **Then** the quantities of items are adjusted to reflect a 3-day trip.
 2. **Given** the user inputs 10 weekdays, **When** the packing list is generated, **Then** the quantities of items are adjusted to reflect a 10-day trip.
 3. **Given** the user changes the number of weekdays from 5 to 7, **When** the packing list is regenerated, **Then** the quantities of items are updated to reflect a 7-day trip.
-4. **Given** the user deselects a category or item, **When** the packing list is generated, **Then** the deselected category/item is hidden from the packing list and marked as excluded. Users can reselect it to restore it to the packing list.
-5. **Given** the user exports the packing list, **When** the system processes the export, **Then** the exported JSON file contains all selected items with their calculated quantities and the packing list name.
 
 ---
 
@@ -74,8 +61,8 @@ The user inputs weather conditions for their trip (e.g., "hot", "cold", "rainy")
 
 **Acceptance Scenarios**:
 
-1. **Given** the user inputs "hot weather", **When** the packing list is generated, **Then** the quantities of summer clothing items increase.
-2. **Given** the user inputs "cold weather", **When** the packing list is generated, **Then** the quantities of winter clothing items increase.
+1. **Given** the user inputs "hot" weather, **When** the packing list is generated, **Then** the quantities of items are adjusted by the hot-weather multiplier.
+2. **Given** the user inputs "cold" weather, **When** the packing list is generated, **Then** the quantities of items are adjusted by the cold-weather multiplier.
 3. **Given** the user changes the weather input from "hot" to "cold", **When** the packing list is regenerated, **Then** the quantities of items are updated to reflect cold weather.
 
 ---
@@ -90,38 +77,33 @@ The user inputs activities for their trip (e.g., "hiking", "beach", "city tour")
 
 **Acceptance Scenarios**:
 
-1. **Given** the user inputs "hiking" as an activity, **When** the packing list is generated, **Then** the quantities of hiking gear increase.
-2. **Given** the user inputs "beach" as an activity, **When** the packing list is generated, **Then** the quantities of beachwear items increase.
-3. **Given** the user changes the activity from "hiking" to "beach", **When** the packing list is regenerated, **Then** the quantities of items are updated to reflect the new activity.
-4. **Given** the user exports the packing list with activities, **When** the system processes the export, **Then** the exported JSON file contains the selected activities and all items with their calculated quantities.
+1. **Given** the user inputs "hiking" as an activity, **When** the packing list is generated, **Then** the quantities of items are adjusted by the hiking multiplier.
+2. **Given** the user inputs multiple activities, **When** the packing list is generated, **Then** the quantities of items are adjusted by the average of the activities' multipliers.
+3. **Given** the user changes the selected activities, **When** the packing list is regenerated, **Then** the quantities of items are updated to reflect the new set.
 
 ---
 
 ### Edge Cases
 
 - **EC-001**: What happens if the user inputs conflicting data (e.g., "hot weather" and "snowboarding activity")?
-  **Answer**: The system prioritizes the activity input and adjusts quantities accordingly, with a warning message displayed to the user.
-  **Acceptance Criteria**: System must display a warning message and update quantities based on the prioritized input.
+  **Answer**: When activities are selected, the average of their multipliers replaces the weather multiplier in the calculation. The rule is deterministic; no warning is displayed.
+  **Acceptance Criteria**: With activities selected, the weather multiplier has no effect on the result.
 
-- **EC-002**: How does the system handle invalid inputs (e.g., negative weekdays)?
-  **Answer**: The system displays an error message and does not update the packing list until valid inputs are provided.
-  **Acceptance Criteria**: System must validate inputs and show clear error messages for invalid values.
+- **EC-002**: How does the system handle invalid inputs (e.g., zero or negative weekdays)?
+  **Answer**: Trip length is a validated value constrained to 1–30; values outside the range are rejected by the input control.
+  **Acceptance Criteria**: The trip length input cannot produce a value outside 1–30.
 
 - **EC-003**: What happens if the user inputs a very large number of weekdays (e.g., 100)?
-  **Answer**: The system calculates quantities proportionally but caps the maximum quantity for any item to a reasonable limit (e.g., 20).
-  **Acceptance Criteria**: System must cap quantities at 20 and handle large inputs gracefully.
+  **Answer**: The input is capped at 30, and the calculation base is additionally capped at 20 days; multipliers still apply on top of the capped base.
+  **Acceptance Criteria**: For any valid input, the base never exceeds 20; the final quantity is the capped base times the combined multipliers, with a minimum of 1.
 
-- **EC-004**: How does the system handle overlapping inputs (e.g., "hot weather" and "cold weather")?
-  **Answer**: The system prioritizes the most recent input and displays a warning message.
-  **Acceptance Criteria**: System must prioritize the most recent input and show a warning message.
+- **EC-004**: How does the system handle an unknown modifier name (e.g., a travel style missing from the configuration)?
+  **Answer**: Unknown names fall back to a neutral multiplier of 1.0 so the calculation never fails.
+  **Acceptance Criteria**: An unknown style, weather, or activity never blocks the calculation.
 
-- **EC-005**: What happens when a user tries to export a packing list with no name?
-  **Answer**: The system automatically assigns a default name (e.g., "Unnamed Packing List - <timestamp>") and prompts the user to rename it.
-  **Acceptance Criteria**: System must handle unnamed lists gracefully and provide a way to rename them.
-
-- **EC-006**: What happens when a user tries to import a corrupted JSON file?
-  **Answer**: The system displays an error message and does not load the file.
-  **Acceptance Criteria**: System must validate imported files and show clear error messages for corruption.
+- **EC-005**: What happens to fixed-quantity items when trip parameters change?
+  **Answer**: Fixed-quantity items keep their quantity regardless of trip parameters; only automatic items are recalculated.
+  **Acceptance Criteria**: A fixed item's quantity is identical before and after any parameter change.
 
 ## Requirements *(mandatory)*
 
@@ -132,33 +114,30 @@ The user inputs activities for their trip (e.g., "hiking", "beach", "city tour")
 - **FR-003**: System MUST weigh quantity calculations based on weather input.
 - **FR-004**: System MUST weigh quantity calculations based on activities.
 - **FR-005**: System MUST update the packing list with calculated quantities in real-time.
-- **FR-006**: System MUST handle conflicting inputs gracefully (e.g., prioritize activities over weather).
-- **FR-007**: System MUST validate user inputs (e.g., non-negative weekdays).
-- **FR-008**: System MUST support packing list export to JSON files.
-- **FR-009**: System MUST support packing list import from JSON files.
-- **FR-010**: System MUST allow packing list renaming.
-- **FR-011**: System MUST persist packing lists in `~/.config/pack-liste/` directory.
-- **FR-012**: System MUST support editable item quantities and packed status toggles.
+- **FR-006**: System MUST resolve conflicting inputs deterministically: when activities are selected, their average multiplier replaces the weather multiplier.
+- **FR-007**: System MUST validate trip length inputs (1–30) and cap the calculation base at 20 days.
+- **FR-008**: System MUST clamp every calculated quantity to a minimum of 1.
+- **FR-009**: System MUST keep fixed-quantity items outside the automatic calculation.
+- **FR-010**: System MUST fall back to a neutral multiplier (1.0) for unknown modifier names.
 
 ### Key Entities *(include if feature involves data)*
 
-- **Weekdays**: Days of the week for the trip.
-- **Travel Style**: User-defined travel style (e.g., "minimalist", "luxury").
-- **Weather Input**: User-provided weather conditions (e.g., "hot", "cold").
-- **Activities**: User-defined activities (e.g., "hiking", "beach").
-- **Quantity Calculation**: Algorithm to determine item quantities based on inputs.
+- **Weekdays**: The trip length in days; validated to 1–30, default 7.
+- **Travel Style**: A named modifier (e.g., "minimalist", "luxury") with a quantity multiplier.
+- **Weather**: A named modifier (e.g., "hot", "cold") with a quantity multiplier.
+- **Activities**: Named modifiers (e.g., "hiking", "beach"); multiple may be selected; their average multiplier applies.
+- **Quantity Calculation**: The deterministic rule: base (weekdays, capped at 20) × travel-style multiplier × effective weather multiplier (weather, or the average of selected activities), rounded, minimum 1.
 
 ## Success Criteria *(mandatory)*
 
 ### Measurable Outcomes
 
 - **SC-001**: Quantity calculations consider weekdays, travel style, weather, and activities.
-- **SC-002**: Packing lists can be exported to and imported from JSON files with 100% data fidelity.
-- **SC-003**: All packing lists must have a unique name (max 50 characters) and support renaming.
-- **SC-004**: Users can see updated quantities within 1 second of input changes.
-- **SC-005**: 100% of calculated quantities are accurate based on the provided inputs.
-- **SC-006**: System handles conflicting inputs (e.g., "hot weather" and "snowboarding activity") gracefully.
-- **SC-007**: Users receive feedback when inputs are invalid (e.g., negative weekdays).
+- **SC-002**: Users see updated quantities within 1 second of input changes.
+- **SC-003**: 100% of calculated quantities are accurate based on the provided inputs (deterministic, unit-tested rule).
+- **SC-004**: The system resolves conflicting inputs (activities vs. weather) deterministically by rule.
+- **SC-005**: Invalid inputs (trip length outside 1–30) are rejected by the input controls.
+- **SC-006**: Every calculated quantity is at least 1, for any valid input.
 
 ## Assumptions
 
@@ -166,12 +145,5 @@ The user inputs activities for their trip (e.g., "hiking", "beach", "city tour")
 - The application is designed for a single user, as per the project constitution.
 - The system provides immediate feedback when inputs are changed.
 - The quantity calculation algorithm is deterministic and produces consistent results for the same inputs.
-- The system prioritizes activities over weather when both are provided (e.g., "snowboarding" overrides "hot weather").
-- Packing lists are stored in `~/.config/pack-liste/` directory.
-- Export/import functionality uses JSON format with UTF-8 encoding.
-
-## Clarifications
-
-### Session 2026-09-19
-
-- Q: How does the subtractive selection process work in the packing list feature? Specifically, what happens when a user deselects a category or item? (FR-005) → A: The system hides deselected categories/items from the packing list and marks them as excluded. Users can reselect it to restore it to the packing list.
+- When activities are selected, their average multiplier replaces the weather multiplier.
+- Modifier names and multipliers are user-configurable (see spec 002); unknown names fall back to 1.0.

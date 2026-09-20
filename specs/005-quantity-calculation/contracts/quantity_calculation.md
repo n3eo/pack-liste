@@ -131,3 +131,11 @@ The quantity calculation contract defines the interface for calculating item qua
 **Warning**: "Conflicting inputs detected. Prioritizing activity input."
 
 **Output**: `{"T-shirt": 2, "Pants": 1, "Winter Jacket": 1, "Snowboard": 1}`
+
+> **Alignment note (2026-09-20)**: This contract predates the shipped
+> implementation and is superseded. Weekdays are validated to 1-30 with a
+> default of 7 (not non-negative with default 0). Modifier names are
+> user-configurable (spec 002), not a fixed predefined set, and unknown
+> names fall back to a neutral multiplier of 1.0. The calculation rule is
+> documented in spec 005 (FR-006 to FR-010) and unit-tested in
+> src/quantity/calculation.rs.

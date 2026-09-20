@@ -6,6 +6,15 @@
 
 **Note**: This template is filled in by the `/speckit.plan` command; its definition describes the execution workflow.
 
+> **Alignment note (2026-09-20)**: This plan predates several design changes
+> made during implementation. The shipped application differs as follows:
+> the `ui/views/` module split was not carried out (the TUI lives in
+> `src/ui/app.rs`); packing-list management (naming, JSON export/import via
+> `PackingService`) was superseded by the trip-file flow (see spec 004) and the
+> corresponding service code is currently unused; quantities are persisted as
+> YAML (config and trip files), not JSON. The quantity calculation itself
+> (`src/quantity/`) matches this plan.
+
 ## Summary
 
 The implementation will update the quantity calculation logic to consider input weekdays, travel style, weather input, and activities. The system will adjust item quantities dynamically based on these inputs, ensuring users pack appropriately for their trips. The implementation will be done in Rust using the Ratatui framework, with modular separation of views, quantity calculation, and error handling using `thiserror`.

@@ -160,3 +160,9 @@ pack-liste export "Summer Trip 2026" "summer-trip-2026.json"
 ```sh
 pack-liste import "summer-trip-2026.json" "Summer Trip 2026"
 ```
+
+> **Alignment note (2026-09-20)**: This contract predates the shipped
+> implementation and is superseded. The application has no CLI subcommands;
+> the only CLI surface is `pack-liste [OPTIONS] [FILE]` (debug, force-tui,
+> and an optional trip file path). Packing-list management commands were
+> superseded by the trip-file flow (spec 004).

@@ -308,3 +308,8 @@ After successful validation:
 1. Deploy to target environment
 2. Monitor performance in production
 3. Collect user feedback for improvements
+
+> **Alignment note (2026-09-20)**: This guide predates the shipped
+> implementation; validate against the current application behavior
+> (trip files, YAML config, welcome-screen inputs) rather than the steps
+> described here.

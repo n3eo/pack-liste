@@ -106,3 +106,8 @@ Represents the algorithm to determine item quantities based on inputs.
 
 **State Transitions**:
 - Initialized → Calculated (when inputs are provided and quantities are computed).
+
+> **Alignment note (2026-09-20)**: This data model predates the shipped
+> implementation. PackingList is the in-memory model only; persistence uses
+> the YAML configuration file (item catalog) and trip files (spec 004),
+> not JSON export. Items carry an auto/fixed quantity mode (spec 003).
