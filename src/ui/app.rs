@@ -50,7 +50,6 @@ pub enum Focus {
     Weekdays,
     TravelStyle,
     Weather,
-    Activities,
 }
 
 impl Focus {
@@ -59,18 +58,16 @@ impl Focus {
             Focus::TripFile => Focus::Weekdays,
             Focus::Weekdays => Focus::TravelStyle,
             Focus::TravelStyle => Focus::Weather,
-            Focus::Weather => Focus::Activities,
-            Focus::Activities => Focus::TripFile,
+            Focus::Weather => Focus::TripFile,
         }
     }
 
     pub fn prev(&self) -> Self {
         match self {
-            Focus::TripFile => Focus::Activities,
+            Focus::TripFile => Focus::Weather,
             Focus::Weekdays => Focus::TripFile,
             Focus::TravelStyle => Focus::Weekdays,
             Focus::Weather => Focus::TravelStyle,
-            Focus::Activities => Focus::Weather,
         }
     }
 }
@@ -80,6 +77,7 @@ pub enum InputField {
     Name,
     Category,
     Quantity,
+    Mode,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -99,8 +97,14 @@ pub enum InputMode {
         name: String,
         category: String,
         quantity: String,
+        /// Quantity mode carried from the item; toggled in the dialog's
+        /// Mode field and written back on save
+        auto_quantity: bool,
         category_list: Vec<String>,
         category_index: usize,
+        /// The item's category memberships; Space toggles the highlighted
+        /// entry in the category dropdown
+        selected_categories: Vec<String>,
     },
     ConfirmDelete {
         index: usize,
@@ -119,6 +123,8 @@ struct PopupFields<'a> {
     name: &'a str,
     category: &'a str,
     quantity: &'a str,
+    /// Quantity mode shown in the edit dialog's Mode field
+    auto_quantity: Option<bool>,
     category_list: &'a [String],
     category_index: usize,
 }
@@ -135,29 +141,84 @@ struct AppConfig {
     #[serde(default = "default_weather_name")]
     weather: String,
     #[serde(default)]
-    selected_activities: Vec<String>,
-    #[serde(default)]
     modifiers: ModifiersConfig,
     /// Name of the trip file to continue by default
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_trip_file: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 struct SavedItem {
     name: String,
-    category: String,
+    /// The item's categories; at least one. A legacy single `category:`
+    /// string is lifted into a one-element list on load.
+    categories: Vec<String>,
     /// Only present for fixed-quantity items (auto_quantity: false);
     /// auto items are recalculated on every load
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     quantity: Option<u32>,
     /// When false, the quantity is fixed and never recalculated
-    #[serde(default = "default_true")]
     auto_quantity: bool,
 }
 
-fn default_true() -> bool {
-    true
+impl<'de> serde::Deserialize<'de> for SavedItem {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{Error, MapAccess, Visitor};
+
+        struct SavedItemVisitor;
+
+        impl<'de> Visitor<'de> for SavedItemVisitor {
+            type Value = SavedItem;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a saved item mapping")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<SavedItem, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut name: Option<String> = None;
+                let mut categories: Option<Vec<String>> = None;
+                let mut category: Option<String> = None;
+                let mut quantity: Option<u32> = None;
+                let mut auto_quantity = true;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "name" => name = Some(map.next_value()?),
+                        "categories" => categories = Some(map.next_value()?),
+                        // Legacy single category (pre multi-category format)
+                        "category" => category = Some(map.next_value()?),
+                        "quantity" => quantity = map.next_value()?,
+                        "auto_quantity" => auto_quantity = map.next_value()?,
+                        _ => {
+                            let _: serde_yaml::Value = map.next_value()?;
+                        }
+                    }
+                }
+
+                let name = name.ok_or_else(|| A::Error::missing_field("name"))?;
+                // Prefer the categories list; lift a legacy single category
+                let categories = match categories {
+                    Some(cs) if !cs.is_empty() => cs,
+                    _ => category.map(|c| vec![c]).unwrap_or_default(),
+                };
+
+                Ok(SavedItem {
+                    name,
+                    categories,
+                    quantity,
+                    auto_quantity,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(SavedItemVisitor)
+    }
 }
 
 fn default_travel_style_name() -> String {
@@ -171,6 +232,783 @@ fn default_weather_name() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---- Test helpers: construct AppDrawState without a terminal ----
+
+    fn test_item(name: &str, category: &str) -> Item {
+        Item::new(
+            format!("id_{name}"),
+            name.to_string(),
+            vec![category.to_string()],
+            1,
+        )
+    }
+
+    fn test_state(items: Vec<Item>) -> AppDrawState {
+        let mut packing_list = PackingList::new("Test Trip".to_string());
+        for item in items {
+            packing_list.add_item(item);
+        }
+        AppDrawState {
+            screen: Screen::Main,
+            packing_list,
+            weekdays: Weekdays::new(7).unwrap(),
+            travel_style: "standard".to_string(),
+            weather: "mixed".to_string(),
+            modifiers: ModifiersConfig::default(),
+            focus: Focus::TripFile,
+            collapsed_categories: Vec::new(),
+            selected_index: 0,
+            focus_side: FocusSide::Left,
+            input_mode: InputMode::Normal,
+            left_scroll: 0,
+            right_scroll: 0,
+            trip_file_path: PathBuf::new(),
+            trip_file_input: String::new(),
+            editing_trip_file: false,
+            resume_prompt: false,
+            remembered_trip_file: None,
+            config_section: ConfigSection::TravelStyles,
+            config_cursor: 0,
+            config_scroll: 0,
+            modifier_editor: None,
+            previous_screen: Screen::Welcome,
+            config_editor_text: Vec::new(),
+            config_editor_cursor: (0, 0),
+            config_editor_scroll: 0,
+            config_editor_error: None,
+        }
+    }
+
+    // ---- Input-handling tests (US5): key events in, state out ----
+
+    #[test]
+    fn cursor_moves_down_and_up_on_main() {
+        let mut state = test_state(vec![
+            test_item("A", "Cat"),
+            test_item("B", "Cat"),
+            test_item("C", "Cat"),
+        ]);
+        // Left panel rows: [Cat header, A, B, C]; cursor starts on header
+        state.move_cursor_down();
+        assert_eq!(state.selected_index, 1);
+        state.move_cursor_down();
+        assert_eq!(state.selected_index, 2);
+        state.move_cursor_up();
+        assert_eq!(state.selected_index, 1);
+    }
+
+    #[test]
+    fn cursor_up_at_top_stays_put() {
+        // Mutation guard: if the up-binding logic inverts, this fails
+        let mut state = test_state(vec![test_item("A", "Cat"), test_item("B", "Cat")]);
+        state.selected_index = 0;
+        state.move_cursor_up();
+        assert_eq!(state.selected_index, 0);
+    }
+
+    #[test]
+    fn cursor_down_at_last_row_stays_put() {
+        let mut state = test_state(vec![test_item("A", "Cat")]);
+        // Left rows: [Cat header, A]; last valid index is 1
+        state.selected_index = 1;
+        state.move_cursor_down();
+        assert_eq!(state.selected_index, 1);
+    }
+
+    #[test]
+    fn welcome_focus_cycles_with_up_down() {
+        let mut state = test_state(Vec::new());
+        state.screen = Screen::Welcome;
+        state.focus = Focus::TripFile;
+        state.move_cursor_down();
+        assert_eq!(state.focus, Focus::Weekdays);
+        state.move_cursor_up();
+        assert_eq!(state.focus, Focus::TripFile);
+        // Wrapping: up from the first field goes to the last
+        state.move_cursor_up();
+        assert_eq!(state.focus, Focus::Weather);
+    }
+
+    #[test]
+    fn item_selection_toggles() {
+        let mut state = test_state(vec![test_item("A", "Cat")]);
+        state.selected_index = 1; // cursor on item A
+        assert!(state.packing_list.items[0].editable);
+        state.toggle_item_selection();
+        assert!(!state.packing_list.items[0].editable);
+        state.toggle_item_selection();
+        assert!(state.packing_list.items[0].editable);
+    }
+
+    #[test]
+    fn category_selection_toggles_all_items_and_collapses() {
+        let mut state = test_state(vec![
+            test_item("A", "Cat"),
+            test_item("B", "Cat"),
+            test_item("C", "Other"),
+        ]);
+        state.selected_index = 0; // cursor on the Cat header
+        state.toggle_category_selection();
+        // Both Cat items deselected, Other untouched; category collapsed
+        assert!(!state.packing_list.items[0].editable);
+        assert!(!state.packing_list.items[1].editable);
+        assert!(state.packing_list.items[2].editable);
+        assert!(state.collapsed_categories.contains(&"Cat".to_string()));
+        // Cursor stays on the header row after collapsing
+        assert_eq!(state.selected_index, 0);
+        // Toggling back reselects and expands
+        state.toggle_category_selection();
+        assert!(state.packing_list.items[0].editable);
+        assert!(state.packing_list.items[1].editable);
+        assert!(!state.collapsed_categories.contains(&"Cat".to_string()));
+    }
+
+    #[test]
+    fn packed_toggles_only_on_right_side() {
+        let mut state = test_state(vec![test_item("A", "Cat")]);
+        state.focus_side = FocusSide::Left;
+        state.selected_index = 1;
+        state.toggle_item_packed();
+        assert!(!state.packing_list.items[0].packed);
+        // On the right side the rows are the selected items only: one row
+        state.focus_side = FocusSide::Right;
+        state.selected_index = 0;
+        state.toggle_item_packed();
+        assert!(state.packing_list.items[0].packed);
+        state.toggle_item_packed();
+        assert!(!state.packing_list.items[0].packed);
+    }
+
+    #[test]
+    fn collapse_moves_cursor_to_header() {
+        let mut state = test_state(vec![test_item("A", "Cat"), test_item("B", "Cat")]);
+        state.selected_index = 2; // cursor on item B
+        state.toggle_category_collapse();
+        assert!(state.collapsed_categories.contains(&"Cat".to_string()));
+        // Cursor moved to the category header (row 0)
+        assert_eq!(state.selected_index, 0);
+        // Expanding keeps the cursor on the header
+        state.toggle_category_collapse();
+        assert!(!state.collapsed_categories.contains(&"Cat".to_string()));
+        assert_eq!(state.selected_index, 0);
+    }
+
+    #[test]
+    fn edit_save_keeps_empty_fields_and_parses_quantity() {
+        let mut state = test_state(vec![test_item("A", "Cat")]);
+        // Empty name and category keep the old values; quantity parses
+        state.apply_item_edit(0, String::new(), vec![], "3".to_string(), None);
+        assert_eq!(state.packing_list.items[0].name, "A");
+        assert_eq!(state.packing_list.items[0].primary_category(), "Cat");
+        assert_eq!(state.packing_list.items[0].quantity, 3);
+        // An unparsable quantity keeps the old value
+        state.apply_item_edit(
+            0,
+            "Renamed".to_string(),
+            vec!["NewCat".to_string()],
+            "x".to_string(),
+            None,
+        );
+        assert_eq!(state.packing_list.items[0].name, "Renamed");
+        assert_eq!(state.packing_list.items[0].primary_category(), "NewCat");
+        assert_eq!(state.packing_list.items[0].quantity, 3);
+        // An out-of-range index is a no-op
+        state.apply_item_edit(9, "X".to_string(), vec![], String::new(), None);
+        assert_eq!(state.packing_list.items.len(), 1);
+    }
+
+    #[test]
+    fn dialog_category_dropdown_moves_within_bounds() {
+        let mut state = test_state(Vec::new());
+        state.input_mode = InputMode::AddingItem {
+            field: InputField::Category,
+            name: String::new(),
+            category: String::new(),
+            quantity: String::new(),
+            category_list: vec!["One".to_string(), "Two".to_string(), "Three".to_string()],
+            category_index: 0,
+        };
+        state.move_cursor_down();
+        match &state.input_mode {
+            InputMode::AddingItem { category_index, .. } => assert_eq!(*category_index, 1),
+            _ => panic!("expected AddingItem mode"),
+        }
+        state.move_cursor_up();
+        state.move_cursor_up(); // below zero: stays at 0
+        match &state.input_mode {
+            InputMode::AddingItem { category_index, .. } => assert_eq!(*category_index, 0),
+            _ => panic!("expected AddingItem mode"),
+        }
+        // Dropdown movement only applies when the category field is focused
+        state.input_mode = InputMode::AddingItem {
+            field: InputField::Name,
+            name: String::new(),
+            category: String::new(),
+            quantity: String::new(),
+            category_list: vec!["One".to_string(), "Two".to_string()],
+            category_index: 0,
+        };
+        state.move_cursor_down();
+        match &state.input_mode {
+            InputMode::AddingItem { category_index, .. } => assert_eq!(*category_index, 0),
+            _ => panic!("expected AddingItem mode"),
+        }
+    }
+
+    // ---- US1 (spec 016): Left/Right cycle the category selection ----
+
+    #[test]
+    fn dialog_left_right_cycles_category_within_bounds() {
+        let mut state = test_state(Vec::new());
+        state.input_mode = InputMode::AddingItem {
+            field: InputField::Category,
+            name: String::new(),
+            category: String::new(),
+            quantity: String::new(),
+            category_list: vec!["One".to_string(), "Two".to_string(), "Three".to_string()],
+            category_index: 0,
+        };
+        state.cycle_category_selection(1);
+        match &state.input_mode {
+            InputMode::AddingItem { category_index, .. } => assert_eq!(*category_index, 1),
+            _ => panic!("expected AddingItem mode"),
+        }
+        state.cycle_category_selection(1);
+        state.cycle_category_selection(1); // at the end: stays at the last entry
+        match &state.input_mode {
+            InputMode::AddingItem { category_index, .. } => assert_eq!(*category_index, 2),
+            _ => panic!("expected AddingItem mode"),
+        }
+        state.cycle_category_selection(-1);
+        state.cycle_category_selection(-1);
+        state.cycle_category_selection(-1); // below zero: stays at 0
+        match &state.input_mode {
+            InputMode::AddingItem { category_index, .. } => assert_eq!(*category_index, 0),
+            _ => panic!("expected AddingItem mode"),
+        }
+    }
+
+    #[test]
+    fn dialog_left_right_only_in_category_field() {
+        let mut state = test_state(Vec::new());
+        state.input_mode = InputMode::AddingItem {
+            field: InputField::Name,
+            name: String::new(),
+            category: String::new(),
+            quantity: String::new(),
+            category_list: vec!["One".to_string(), "Two".to_string()],
+            category_index: 0,
+        };
+        state.cycle_category_selection(1);
+        match &state.input_mode {
+            InputMode::AddingItem { category_index, .. } => assert_eq!(*category_index, 0),
+            _ => panic!("expected AddingItem mode"),
+        }
+        // EditingItem mode behaves the same
+        state.input_mode = InputMode::EditingItem {
+            index: 0,
+            field: InputField::Quantity,
+            name: String::new(),
+            category: String::new(),
+            quantity: String::new(),
+            auto_quantity: true,
+            category_list: vec!["One".to_string(), "Two".to_string()],
+            category_index: 1,
+            selected_categories: vec!["One".to_string()],
+        };
+        state.cycle_category_selection(1);
+        match &state.input_mode {
+            InputMode::EditingItem { category_index, .. } => assert_eq!(*category_index, 1),
+            _ => panic!("expected EditingItem mode"),
+        }
+        state.input_mode = InputMode::EditingItem {
+            index: 0,
+            field: InputField::Category,
+            name: String::new(),
+            category: String::new(),
+            quantity: String::new(),
+            auto_quantity: true,
+            category_list: vec!["One".to_string(), "Two".to_string()],
+            category_index: 0,
+            selected_categories: vec!["One".to_string()],
+        };
+        state.cycle_category_selection(1);
+        match &state.input_mode {
+            InputMode::EditingItem { category_index, .. } => assert_eq!(*category_index, 1),
+            _ => panic!("expected EditingItem mode"),
+        }
+    }
+
+    // ---- US1: auto/fixed quantity mode in the edit dialog ----
+
+    #[test]
+    fn mode_field_cycles_in_tab_rotation() {
+        // Tab rotation: Name -> Category -> Quantity -> Mode -> Name
+        let f = |x: InputField| match x {
+            InputField::Name => InputField::Category,
+            InputField::Category => InputField::Quantity,
+            InputField::Quantity => InputField::Mode,
+            InputField::Mode => InputField::Name,
+        };
+        let mut field = InputField::Name;
+        field = f(field);
+        assert_eq!(field, InputField::Category);
+        field = f(field);
+        assert_eq!(field, InputField::Quantity);
+        field = f(field);
+        assert_eq!(field, InputField::Mode);
+        field = f(field);
+        assert_eq!(field, InputField::Name);
+    }
+
+    #[test]
+    fn mode_toggle_flips_auto_quantity_in_edit_dialog() {
+        let mut state = test_state(vec![test_item("A", "Cat")]);
+        state.input_mode = InputMode::EditingItem {
+            index: 0,
+            field: InputField::Mode,
+            name: "A".to_string(),
+            category: "Cat".to_string(),
+            quantity: "1".to_string(),
+            auto_quantity: true,
+            category_list: vec!["Cat".to_string()],
+            category_index: 0,
+            selected_categories: vec!["Cat".to_string()],
+        };
+        state.toggle_edit_mode();
+        match &state.input_mode {
+            InputMode::EditingItem { auto_quantity, .. } => assert!(!*auto_quantity),
+            _ => panic!("expected EditingItem mode"),
+        }
+        state.toggle_edit_mode();
+        match &state.input_mode {
+            InputMode::EditingItem { auto_quantity, .. } => assert!(*auto_quantity),
+            _ => panic!("expected EditingItem mode"),
+        }
+    }
+
+    #[test]
+    fn apply_edit_writes_mode_and_freezes_quantity_when_fixed() {
+        // auto -> fixed: the current quantity becomes the fixed value (EC-003)
+        let mut state = test_state(vec![test_item("A", "Cat")]);
+        state.packing_list.items[0].quantity = 5;
+        state.packing_list.items[0].auto_quantity = false; // dialog toggled to fixed
+        state.apply_item_edit(0, String::new(), vec![], String::new(), Some(false));
+        assert!(!state.packing_list.items[0].auto_quantity);
+        assert_eq!(state.packing_list.items[0].quantity, 5);
+        // fixed -> auto: the flag flips; the caller recalculates
+        state.apply_item_edit(0, String::new(), vec![], String::new(), Some(true));
+        assert!(state.packing_list.items[0].auto_quantity);
+    }
+
+    #[test]
+    fn fixed_quantity_cannot_drop_below_one() {
+        // EC-004: no fixed item can hold a quantity below 1
+        let mut state = test_state(vec![test_item("A", "Cat")]);
+        state.packing_list.items[0].auto_quantity = false;
+        state.apply_item_edit(0, String::new(), vec![], "0".to_string(), None);
+        assert_eq!(state.packing_list.items[0].quantity, 1);
+    }
+
+    // ---- US2: category packing indicator ----
+
+    #[test]
+    fn category_all_packed_derivation() {
+        // All packed -> all-packed
+        assert!(category_all_packed(&[true, true]));
+        // One unpacked -> partially packed
+        assert!(!category_all_packed(&[true, false, true]));
+        // None packed -> partially packed
+        assert!(!category_all_packed(&[false]));
+        // Empty category -> all-packed (vacuous truth)
+        assert!(category_all_packed(&[]));
+    }
+
+    // ---- US4: help screen completeness ----
+
+    #[test]
+    fn help_lists_every_binding_token() {
+        // The tokens the handlers actually respond to (the curated binding
+        // list from contracts/input-and-help.md). Every token must appear
+        // in the help content; the token list must have no duplicates.
+        let tokens = help_binding_tokens();
+
+        // No duplicates (SC-004)
+        let mut sorted = tokens.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            sorted.len(),
+            tokens.len(),
+            "help_binding_tokens contains duplicates"
+        );
+
+        // Every token is rendered by the help screen: the entries are
+        // built from the same token strings, so the help text contains
+        // each token verbatim.
+        let help_text = help_screen_text();
+        for token in &tokens {
+            assert!(
+                help_text.contains(token),
+                "help screen is missing binding: {token}"
+            );
+        }
+    }
+
+    #[test]
+    fn help_screen_text_covers_all_handler_bindings() {
+        // The curated handler-binding list (from the code review): every
+        // binding the key handlers respond to must be a help token.
+        let handler_bindings = [
+            // Global
+            "Ctrl+C",
+            "Ctrl+E",
+            "q",
+            "?",
+            "O",
+            // Welcome
+            "↑/↓",
+            "←/→",
+            "+/-",
+            "Space",
+            "Enter",
+            "F",
+            "Esc",
+            // Resume prompt
+            "Y",
+            "N",
+            // Main
+            "Tab",
+            "BackTab",
+            "Ctrl+Space",
+            "C",
+            "A",
+            "E",
+            "D",
+            "R",
+            // Dialog (Mode field added by US1)
+            "Mode",
+            // Raw config editor
+            "Home/End",
+            "Backspace",
+            "Ctrl+S",
+        ];
+        let tokens = help_binding_tokens();
+        for binding in handler_bindings {
+            assert!(
+                tokens.contains(&binding),
+                "handler binding missing from help tokens: {binding}"
+            );
+        }
+    }
+
+    // ---- US5 (spec 016): hints and help agree ----
+
+    fn all_hint_surfaces() -> [HintSurface; 8] {
+        [
+            HintSurface::LeftPanel,
+            HintSurface::RightPanel,
+            HintSurface::Welcome,
+            HintSurface::Config,
+            HintSurface::AddEditPopup,
+            HintSurface::DeletePopup,
+            HintSurface::ModifierEditor,
+            HintSurface::RawEditor,
+        ]
+    }
+
+    #[test]
+    fn hint_keys_are_help_tokens() {
+        // Every key shown in any surface's hint line must be a help
+        // token, so hints cannot show a binding the help omits.
+        let tokens = help_binding_tokens();
+        for surface in all_hint_surfaces() {
+            for (key, _) in hint_entries(surface) {
+                assert!(
+                    tokens.contains(key),
+                    "hint key {key:?} ({surface:?}) missing from help tokens"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hint_entries_match_the_contract_binding_sets() {
+        // The drop/stale direction: each surface's entry set must equal
+        // the contract's binding set exactly, so removing or corrupting
+        // an entry (e.g. deleting ("C", "Collapse") from the left
+        // panel) fails this test.
+        let expected: [(HintSurface, &[(&str, &str)]); 8] = [
+            (
+                HintSurface::LeftPanel,
+                &[
+                    ("↑/↓", "Navigate"),
+                    ("Space", "Select"),
+                    ("Ctrl+Space", "Category"),
+                    ("A", "Add"),
+                    ("E", "Edit"),
+                    ("D", "Delete"),
+                    ("C", "Collapse"),
+                    ("R", "Recalculate"),
+                    ("Tab", "Switch"),
+                    ("?", "Help"),
+                ],
+            ),
+            (
+                HintSurface::RightPanel,
+                &[
+                    ("↑/↓", "Navigate"),
+                    ("Space", "Packed"),
+                    ("R", "Recalculate"),
+                    ("Tab", "Switch"),
+                    ("?", "Help"),
+                ],
+            ),
+            (
+                HintSurface::Welcome,
+                &[
+                    ("↑/↓", "Navigate fields"),
+                    ("←/→", "Adjust values"),
+                    ("+/-", "Weekdays"),
+                    ("Enter", "Edit file / Continue"),
+                    ("F", "Edit path"),
+                    ("O", "Config"),
+                    ("Ctrl+E", "Raw editor"),
+                    ("q", "Quit"),
+                ],
+            ),
+            (
+                HintSurface::Config,
+                &[
+                    ("Tab", "Section"),
+                    ("↑/↓", "Move"),
+                    ("A", "Add"),
+                    ("E", "Edit"),
+                    ("D", "Delete"),
+                    ("Ctrl+E", "Raw editor"),
+                    ("Esc", "Back"),
+                ],
+            ),
+            (
+                HintSurface::AddEditPopup,
+                &[
+                    ("Tab", "Cycle fields"),
+                    ("↑/↓", "Category dropdown"),
+                    ("←/→", "Cycle category"),
+                    ("Space", "Mode / Category"),
+                    ("Enter", "Save"),
+                    ("Esc", "Cancel"),
+                ],
+            ),
+            (
+                HintSurface::DeletePopup,
+                &[("Enter", "Confirm"), ("Esc", "Cancel")],
+            ),
+            (
+                HintSurface::ModifierEditor,
+                &[
+                    ("Tab", "Switch field"),
+                    ("Enter", "Save"),
+                    ("Esc", "Cancel"),
+                ],
+            ),
+            (
+                HintSurface::RawEditor,
+                &[
+                    ("↑/↓/←/→", "Cursor"),
+                    ("Home/End", "Line start/end"),
+                    ("Enter", "New line"),
+                    ("Backspace", "Delete"),
+                    ("Ctrl+S", "Save & apply"),
+                    ("Esc", "Cancel"),
+                ],
+            ),
+        ];
+        for (surface, contract) in expected {
+            let actual = hint_entries(surface);
+            assert_eq!(
+                actual, contract,
+                "{surface:?} hint entries drifted from the contract"
+            );
+        }
+    }
+
+    #[test]
+    fn hint_lines_use_the_unified_style() {
+        // The single constructor renders " | " separators and no
+        // long-form arrow words; the corrupted text is gone.
+        let line = hint_line(hint_entries(HintSurface::LeftPanel));
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains(" | "), "hint line must use | separators");
+        assert!(!text.contains("Up/Down"), "hint line must use glyphs");
+        assert!(!text.contains("Left/Right"), "hint line must use glyphs");
+        let all_text = format!("{}{}", help_screen_text(), {
+            let mut s = String::new();
+            for surface in [
+                HintSurface::LeftPanel,
+                HintSurface::RightPanel,
+                HintSurface::Welcome,
+                HintSurface::Config,
+                HintSurface::AddEditPopup,
+                HintSurface::DeletePopup,
+                HintSurface::ModifierEditor,
+                HintSurface::RawEditor,
+            ] {
+                for (k, a) in hint_entries(surface) {
+                    s.push_str(k);
+                    s.push_str(a);
+                }
+            }
+            s
+        });
+        assert!(
+            !all_text.contains("fields.category"),
+            "corrupted hint text must be gone"
+        );
+    }
+
+    #[test]
+    fn hint_rows_fit_width_and_keep_every_entry() {
+        // At the minimum panel width (39 columns at an 80-column
+        // terminal), every entry still appears and no row overflows.
+        let entries = hint_entries(HintSurface::LeftPanel);
+        let rows = hint_rows(entries, 39);
+        let mut seen: Vec<(&str, &str)> = Vec::new();
+        for row in &rows {
+            let text: String = row.spans.iter().map(|s| s.content.to_string()).collect();
+            assert!(
+                text.chars().count() <= 39,
+                "hint row exceeds the panel width: {text:?}"
+            );
+            // Count full "KEY Action" occurrences, not substrings
+            for (key, action) in entries {
+                if text.contains(&format!("{key} {action}")) {
+                    seen.push((key, action));
+                }
+            }
+        }
+        // Every entry appears exactly once across the rows
+        assert_eq!(seen.len(), entries.len(), "every entry must appear once");
+        // A wide width packs everything into one row
+        assert_eq!(hint_rows(entries, 200).len(), 1);
+        // An empty entry list still yields one (blank) row
+        assert_eq!(hint_rows(&[], 39).len(), 1);
+    }
+
+    // ---- US1/US3 (spec 018): the recalculate action ----
+
+    #[test]
+    fn recalculate_updates_auto_and_preserves_fixed() {
+        let mut auto_item = test_item("Auto", "Cat");
+        auto_item.quantity = 99; // stale bogus value
+        let mut fixed_item = test_item("Fixed", "Cat");
+        fixed_item.quantity = 3;
+        fixed_item.auto_quantity = false;
+        let mut state = test_state(vec![auto_item, fixed_item]);
+        // Non-quantity state the action must not touch
+        state.packing_list.items[0].editable = true;
+        state.packing_list.items[0].packed = true;
+        state.collapsed_categories = vec!["Cat".to_string()];
+
+        state
+            .recalculate_quantities(&QuantityCalculation::new())
+            .unwrap();
+
+        // The auto item recalculates: 7 weekdays × 1.0 standard × 1.0 mixed = 7
+        assert_eq!(state.packing_list.items[0].quantity, 7);
+        // The fixed item keeps its value
+        assert_eq!(state.packing_list.items[1].quantity, 3);
+        // Non-quantity state is untouched (SC-003)
+        assert!(state.packing_list.items[0].editable);
+        assert!(state.packing_list.items[0].packed);
+        assert_eq!(state.collapsed_categories, vec!["Cat".to_string()]);
+
+        // Idempotent: a second run with unchanged inputs changes nothing
+        state
+            .recalculate_quantities(&QuantityCalculation::new())
+            .unwrap();
+        assert_eq!(state.packing_list.items[0].quantity, 7);
+        assert_eq!(state.packing_list.items[1].quantity, 3);
+    }
+
+    // ---- US6: multi-category items ----
+
+    #[test]
+    fn multi_category_item_appears_under_each_category() {
+        let mut item = test_item("A", "Cat");
+        item.categories = vec!["Cat".to_string(), "Gear".to_string()];
+        let state = test_state(vec![item]);
+        let rows = state.left_rows();
+        // The item appears under both category headers
+        let mut cat_positions = Vec::new();
+        let mut item_count = 0;
+        for (i, row) in rows.iter().enumerate() {
+            match row {
+                PanelRow::Category(c) => {
+                    if c == "Cat" || c == "Gear" {
+                        cat_positions.push(i);
+                    }
+                }
+                PanelRow::Item(idx) => {
+                    if state.packing_list.items[*idx].name == "A" {
+                        item_count += 1;
+                    }
+                }
+            }
+        }
+        assert_eq!(cat_positions.len(), 2, "both category headers present");
+        assert_eq!(item_count, 2, "item shown under both headers");
+    }
+
+    #[test]
+    fn multi_category_selection_is_shared() {
+        // One item, two memberships: toggling selection through either
+        // occurrence flips the item once, everywhere
+        let mut item = test_item("A", "Cat");
+        item.categories = vec!["Cat".to_string(), "Gear".to_string()];
+        let mut state = test_state(vec![item]);
+        // Cursor on the item under the Cat header (row 1)
+        state.selected_index = 1;
+        state.toggle_item_selection();
+        assert!(!state.packing_list.items[0].editable);
+        // The compiled list shows the item at most once (primary category)
+        let right = state.right_item_order();
+        assert_eq!(right.len(), 0, "deselected item gone from compiled list");
+        // Reselect through the Gear occurrence
+        state.selected_index = 2; // Gear header is row 2, item row 3
+        state.selected_index = 3;
+        state.toggle_item_selection();
+        assert!(state.packing_list.items[0].editable);
+        let right = state.right_item_order();
+        assert_eq!(right.len(), 1, "item appears once in compiled list");
+    }
+
+    #[test]
+    fn multi_category_reconcile_matches_any_membership() {
+        use crate::config::trip_file::{TripFile, TripItem};
+        let mut trip = TripFile {
+            weekdays: 7,
+            travel_style: "standard".to_string(),
+            weather: "mixed".to_string(),
+            items: vec![TripItem {
+                name: "Knife".to_string(),
+                category: "Kitchen".to_string(),
+                packed: true,
+            }],
+        };
+        // The catalog item "Knife" moved to a new category set; the trip
+        // item's old category matches none, but the name does
+        let config_items = vec![(
+            "Knife".to_string(),
+            vec!["Cooking".to_string(), "Gear".to_string()],
+        )];
+        trip.reconcile(&config_items);
+        assert_eq!(trip.items.len(), 1);
+        // Remapped to the catalog item's primary category
+        assert_eq!(trip.items[0].category, "Cooking");
+        assert!(trip.items[0].packed, "packed state preserved");
+    }
 
     #[test]
     fn old_config_without_trip_params_loads() {
@@ -186,10 +1024,8 @@ mod tests {
         assert_eq!(config.weekdays, 0); // serde default, clamped to Weekdays default on load
         assert_eq!(config.travel_style, "standard");
         assert_eq!(config.weather, "mixed");
-        assert!(config.selected_activities.is_empty());
         assert!(!config.modifiers.travel_styles.is_empty());
         assert!(!config.modifiers.weather.is_empty());
-        assert!(!config.modifiers.activities.is_empty());
     }
 
     #[test]
@@ -199,13 +1035,13 @@ mod tests {
             items: vec![
                 SavedItem {
                     name: "T-Shirt".to_string(),
-                    category: "Clothing".to_string(),
+                    categories: vec!["Clothing".to_string()],
                     quantity: None,
                     auto_quantity: true,
                 },
                 SavedItem {
                     name: "Toothbrush".to_string(),
-                    category: "Toiletries".to_string(),
+                    categories: vec!["Toiletries".to_string()],
                     quantity: Some(1),
                     auto_quantity: false,
                 },
@@ -213,7 +1049,6 @@ mod tests {
             weekdays: 10,
             travel_style: "luxury".to_string(),
             weather: "snowy".to_string(),
-            selected_activities: vec!["skiing".to_string()],
             modifiers: ModifiersConfig::default(),
             last_trip_file: Some("my-trip.yaml".to_string()),
         };
@@ -222,7 +1057,6 @@ mod tests {
         assert_eq!(parsed.weekdays, 10);
         assert_eq!(parsed.travel_style, "luxury");
         assert_eq!(parsed.weather, "snowy");
-        assert_eq!(parsed.selected_activities, vec!["skiing".to_string()]);
         assert_eq!(parsed.last_trip_file.as_deref(), Some("my-trip.yaml"));
         // Auto items do not persist a quantity
         assert_eq!(parsed.items[0].quantity, None);
@@ -244,14 +1078,13 @@ mod tests {
             categories: vec![],
             items: vec![SavedItem {
                 name: "T-Shirt".to_string(),
-                category: "Clothing".to_string(),
+                categories: vec!["Clothing".to_string()],
                 quantity: None,
                 auto_quantity: true,
             }],
             weekdays: 7,
             travel_style: "standard".to_string(),
             weather: "mixed".to_string(),
-            selected_activities: vec![],
             modifiers: ModifiersConfig::default(),
             last_trip_file: None,
         };
@@ -272,7 +1105,6 @@ mod tests {
             weekdays: 7,
             travel_style: "standard".to_string(),
             weather: "cold".to_string(),
-            selected_activities: vec!["hiking".to_string()],
             items: vec![
                 TripItem {
                     name: "T-Shirt".to_string(),
@@ -289,8 +1121,8 @@ mod tests {
 
         // Reconcile against a config where "Old Item" no longer exists
         let config_items = vec![
-            ("T-Shirt".to_string(), "Clothing".to_string()),
-            ("Socks".to_string(), "Clothing".to_string()),
+            ("T-Shirt".to_string(), vec!["Clothing".to_string()]),
+            ("Socks".to_string(), vec!["Clothing".to_string()]),
         ];
         trip.reconcile(&config_items);
 
@@ -305,6 +1137,34 @@ mod tests {
         assert_eq!(parsed.weekdays, 7);
         assert_eq!(parsed.items.len(), 1);
         assert!(parsed.items[0].packed);
+    }
+
+    #[test]
+    fn legacy_files_with_activity_fields_load_and_save_clean() {
+        // US3/SC-003: pre-feature files carrying activity fields load
+        // without error (serde ignores unknown fields); US3/SC-004: new
+        // saves contain no activity keys
+        let legacy_config = "categories:\n- Clothing\nitems:\n- name: T-Shirt\n  categories:\n  - Clothing\n  auto_quantity: true\nweekdays: 7\ntravel_style: standard\nweather: mixed\nselected_activities:\n- hiking\nmodifiers:\n  travel_styles:\n  - name: standard\n    multiplier: 1.0\n  weather:\n  - name: mixed\n    multiplier: 1.0\n  activities:\n  - name: hiking\n    multiplier: 1.5\n";
+        let config: AppConfig = serde_yaml::from_str(legacy_config).unwrap();
+        assert_eq!(config.items.len(), 1);
+        assert_eq!(config.weekdays, 7);
+
+        let legacy_trip = "weekdays: 7\ntravel_style: standard\nweather: mixed\nselected_activities:\n- hiking\nitems:\n- name: T-Shirt\n  category: Clothing\n  packed: true\n";
+        let trip: crate::config::trip_file::TripFile = serde_yaml::from_str(legacy_trip).unwrap();
+        assert_eq!(trip.items.len(), 1);
+        assert!(trip.items[0].packed);
+
+        // Serialized output contains no activity keys (SC-004)
+        let config_yaml = serde_yaml::to_string(&config).unwrap();
+        assert!(
+            !config_yaml.contains("activit"),
+            "config save must not contain activity fields: {config_yaml}"
+        );
+        let trip_yaml = serde_yaml::to_string(&trip).unwrap();
+        assert!(
+            !trip_yaml.contains("activit"),
+            "trip save must not contain activity fields: {trip_yaml}"
+        );
     }
 
     #[test]
@@ -341,7 +1201,6 @@ struct AppDrawState {
     weekdays: Weekdays,
     travel_style: String,
     weather: String,
-    selected_activities: Vec<String>,
     modifiers: ModifiersConfig,
     focus: Focus,
     collapsed_categories: Vec<String>,
@@ -350,7 +1209,6 @@ struct AppDrawState {
     input_mode: InputMode,
     left_scroll: usize,
     right_scroll: usize,
-    activity_cursor: usize,
     /// Path of the packing list file to persist (where the trip is saved on exit)
     trip_file_path: PathBuf,
     /// Text input for the trip file path on the welcome screen
@@ -384,7 +1242,6 @@ struct AppDrawState {
 enum ConfigSection {
     TravelStyles,
     Weather,
-    Activities,
 }
 
 impl ConfigSection {
@@ -392,23 +1249,20 @@ impl ConfigSection {
         match self {
             ConfigSection::TravelStyles => "Travel Styles",
             ConfigSection::Weather => "Weather",
-            ConfigSection::Activities => "Activities",
         }
     }
 
     fn next(&self) -> Self {
         match self {
             ConfigSection::TravelStyles => ConfigSection::Weather,
-            ConfigSection::Weather => ConfigSection::Activities,
-            ConfigSection::Activities => ConfigSection::TravelStyles,
+            ConfigSection::Weather => ConfigSection::TravelStyles,
         }
     }
 
     fn prev(&self) -> Self {
         match self {
-            ConfigSection::TravelStyles => ConfigSection::Activities,
+            ConfigSection::TravelStyles => ConfigSection::Weather,
             ConfigSection::Weather => ConfigSection::TravelStyles,
-            ConfigSection::Activities => ConfigSection::Weather,
         }
     }
 }
@@ -444,10 +1298,12 @@ impl AppDrawState {
         let mut categories_map: std::collections::BTreeMap<String, Vec<usize>> =
             std::collections::BTreeMap::new();
         for (idx, item) in self.packing_list.items.iter().enumerate() {
-            categories_map
-                .entry(item.category.clone())
-                .or_default()
-                .push(idx);
+            for category in &item.categories {
+                categories_map
+                    .entry(category.clone())
+                    .or_default()
+                    .push(idx);
+            }
         }
 
         let mut rows = Vec::new();
@@ -470,7 +1326,7 @@ impl AppDrawState {
         for (idx, item) in self.packing_list.items.iter().enumerate() {
             if item.editable {
                 categories_map
-                    .entry(item.category.clone())
+                    .entry(item.primary_category().to_string())
                     .or_default()
                     .push(idx);
             }
@@ -492,6 +1348,312 @@ impl AppDrawState {
                 .into_iter()
                 .map(PanelRow::Item)
                 .collect(),
+        }
+    }
+
+    // The item the cursor is on, if it is on an item row
+    fn cursor_item_index(&self) -> Option<usize> {
+        let rows = self.active_rows();
+        match rows.get(self.selected_index) {
+            Some(PanelRow::Item(index)) => Some(*index),
+            _ => None,
+        }
+    }
+
+    // The category the cursor is on (header row or one of its items)
+    fn cursor_category(&self) -> Option<String> {
+        let rows = self.active_rows();
+        match rows.get(self.selected_index) {
+            Some(PanelRow::Category(c)) => Some(c.clone()),
+            Some(PanelRow::Item(index)) => Some(
+                self.packing_list.items[*index]
+                    .primary_category()
+                    .to_string(),
+            ),
+            None => None,
+        }
+    }
+
+    // Collapse (true) or expand (false) the category under the cursor.
+    // When collapsing, the cursor moves to the category's header row so it
+    // stays visible.
+    fn set_category_collapsed(&mut self, collapsed: bool) {
+        let Some(category) = self.cursor_category() else {
+            return;
+        };
+
+        if collapsed {
+            if !self.collapsed_categories.contains(&category) {
+                self.collapsed_categories.push(category.clone());
+            }
+            // Move the cursor to the category's header row
+            let rows = self.active_rows();
+            if let Some(row) = rows
+                .iter()
+                .position(|r| matches!(r, PanelRow::Category(c) if *c == category))
+            {
+                self.selected_index = row;
+            }
+        } else {
+            self.collapsed_categories.retain(|c| c != &category);
+        }
+    }
+
+    fn toggle_category_collapse(&mut self) {
+        // Toggle collapse of the category the cursor is on
+        let collapsed = self
+            .cursor_category()
+            .map(|c| self.collapsed_categories.contains(&c))
+            .unwrap_or(false);
+        self.set_category_collapsed(!collapsed);
+    }
+
+    fn toggle_item_selection(&mut self) {
+        // Toggle selection of the currently selected item
+        if let Some(item_index) = self.cursor_item_index() {
+            let item = &mut self.packing_list.items[item_index];
+            item.editable = !item.editable;
+        }
+    }
+
+    fn toggle_category_selection(&mut self) {
+        // Toggle selection of all items in the current category, then
+        // collapse the group when items were added to the trip and expand
+        // it when they were removed
+        let Some(category) = self.cursor_category() else {
+            return;
+        };
+
+        let was_selected = self
+            .packing_list
+            .items
+            .iter()
+            .any(|item| item.in_category(&category) && item.editable);
+
+        for item in &mut self.packing_list.items {
+            if item.in_category(&category) {
+                item.editable = !item.editable;
+            }
+        }
+
+        // Follow the selection state: added -> collapse, removed -> expand
+        let now_selected = !was_selected;
+        self.set_category_collapsed(!now_selected);
+    }
+
+    fn toggle_item_packed(&mut self) {
+        // Only toggle packed status when on right side
+        if self.focus_side == FocusSide::Right
+            && let Some(item_index) = self.cursor_item_index()
+        {
+            self.packing_list.items[item_index].packed =
+                !self.packing_list.items[item_index].packed;
+        }
+    }
+
+    // Toggle the quantity mode (automatic/fixed) in the edit dialog
+    fn toggle_edit_mode(&mut self) {
+        if let InputMode::EditingItem { auto_quantity, .. } = &mut self.input_mode {
+            *auto_quantity = !*auto_quantity;
+        }
+    }
+
+    // Cycle the category selection in the add/edit dialog (Left/Right);
+    // clamped at the list bounds, only when the Category field is focused
+    fn cycle_category_selection(&mut self, direction: i32) {
+        let (field, category_list, category_index) = match &mut self.input_mode {
+            InputMode::AddingItem {
+                field,
+                category_list,
+                category_index,
+                ..
+            } => (field, category_list, category_index),
+            InputMode::EditingItem {
+                field,
+                category_list,
+                category_index,
+                ..
+            } => (field, category_list, category_index),
+            _ => return,
+        };
+        if *field == InputField::Category {
+            let target = (*category_index as i32 + direction)
+                .clamp(0, category_list.len().saturating_sub(1) as i32);
+            *category_index = target as usize;
+        }
+    }
+
+    /// Recalculate every automatic item's quantity from the current
+    /// trip parameters and per-item configuration. Fixed items keep
+    /// their values; packed, selection, and collapse states are
+    /// untouched; nothing is written to disk. Idempotent for
+    /// unchanged inputs.
+    fn recalculate_quantities(&mut self, calc: &QuantityCalculation) -> Result<()> {
+        // Resolve multipliers from the config; fall back to 1.0 for unknown names
+        let style_multiplier = self
+            .modifiers
+            .travel_style_multiplier(&self.travel_style)
+            .unwrap_or(1.0);
+        let weather_multiplier = self
+            .modifiers
+            .weather_multiplier(&self.weather)
+            .unwrap_or(1.0);
+
+        let item_specs: Vec<ItemQuantitySpec> = self
+            .packing_list
+            .items
+            .iter()
+            .map(|item| {
+                if item.auto_quantity {
+                    ItemQuantitySpec::Auto
+                } else {
+                    ItemQuantitySpec::Fixed(item.quantity)
+                }
+            })
+            .collect();
+
+        let input = QuantityCalculationInput {
+            weekdays: self.weekdays,
+            item_specs,
+            travel_style: self.travel_style.clone(),
+            travel_style_multiplier: style_multiplier,
+            weather: self.weather.clone(),
+            weather_multiplier,
+        };
+
+        let output = calc.calculate(&input)?;
+
+        // Update item quantities
+        for (i, quantity) in output.item_quantities.iter().enumerate() {
+            if i < self.packing_list.items.len() {
+                self.packing_list.items[i].quantity = *quantity;
+            }
+        }
+
+        Ok(())
+    }
+
+    // Apply the edit dialog's fields to an item; empty fields keep the
+    // old value, an unparsable quantity keeps the old quantity. The
+    // optional mode, when given, writes the dialog's auto/fixed flag.
+    // The categories replace the item's memberships (never empty).
+    fn apply_item_edit(
+        &mut self,
+        index: usize,
+        name: String,
+        categories: Vec<String>,
+        quantity: String,
+        auto_quantity: Option<bool>,
+    ) {
+        if index >= self.packing_list.items.len() {
+            return;
+        }
+        let item = &mut self.packing_list.items[index];
+
+        if !name.is_empty() {
+            item.name = name;
+        }
+        if !categories.is_empty() {
+            // Deduplicate memberships, preserving order
+            let mut seen = std::collections::BTreeSet::new();
+            item.categories = categories
+                .into_iter()
+                .filter(|c| seen.insert(c.clone()))
+                .collect();
+        }
+        if let Ok(qty) = quantity.parse::<u32>() {
+            // Quantities never drop below 1 (spec 003 EC)
+            item.quantity = qty.max(1);
+        }
+        if let Some(auto) = auto_quantity {
+            item.auto_quantity = auto;
+        }
+    }
+
+    // Move the cursor up one row (or field / dropdown entry, per screen
+    // and input mode); the caller handles the left-panel sync
+    fn move_cursor_up(&mut self) {
+        match self.screen {
+            Screen::Welcome => {
+                // Up/Down navigate between fields; Left/Right adjust values
+                self.focus = self.focus.prev();
+            }
+            Screen::Config | Screen::ConfigEditor | Screen::Help => {}
+            Screen::Main => {
+                if matches!(self.input_mode, InputMode::Normal) {
+                    // Navigate up through the visible rows of the focused side
+                    if self.selected_index > 0 {
+                        self.selected_index -= 1;
+                    }
+                } else if let InputMode::AddingItem {
+                    field,
+                    category_index,
+                    ..
+                } = &mut self.input_mode
+                {
+                    // Only navigate category dropdown when category field is selected
+                    if *field == InputField::Category && *category_index > 0 {
+                        *category_index -= 1;
+                    }
+                } else if let InputMode::EditingItem {
+                    field,
+                    category_index,
+                    ..
+                } = &mut self.input_mode
+                {
+                    // Only navigate category dropdown when category field is selected
+                    if *field == InputField::Category && *category_index > 0 {
+                        *category_index -= 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // Move the cursor down one row (or field / dropdown entry, per screen
+    // and input mode); the caller handles the left-panel sync
+    fn move_cursor_down(&mut self) {
+        match self.screen {
+            Screen::Welcome => {
+                // Up/Down navigate between fields; Left/Right adjust values
+                self.focus = self.focus.next();
+            }
+            Screen::Config | Screen::ConfigEditor | Screen::Help => {}
+            Screen::Main => {
+                if matches!(self.input_mode, InputMode::Normal) {
+                    // Navigate down through the visible rows of the focused side
+                    let rows = self.active_rows();
+                    if self.selected_index < rows.len().saturating_sub(1) {
+                        self.selected_index += 1;
+                    }
+                } else if let InputMode::AddingItem {
+                    field,
+                    category_index,
+                    category_list,
+                    ..
+                } = &mut self.input_mode
+                {
+                    // Only navigate category dropdown when category field is selected
+                    if *field == InputField::Category
+                        && *category_index < category_list.len().saturating_sub(1)
+                    {
+                        *category_index += 1;
+                    }
+                } else if let InputMode::EditingItem {
+                    field,
+                    category_index,
+                    category_list,
+                    ..
+                } = &mut self.input_mode
+                {
+                    // Only navigate category dropdown when category field is selected
+                    if *field == InputField::Category
+                        && *category_index < category_list.len().saturating_sub(1)
+                    {
+                        *category_index += 1;
+                    }
+                }
+            }
         }
     }
 }
@@ -548,16 +1710,15 @@ impl App {
         let mut weekdays = trip_params.weekdays;
         let mut travel_style = trip_params.travel_style;
         let mut weather = trip_params.weather;
-        let mut selected_activities = trip_params.selected_activities;
 
         // Load and reconcile the trip file if a path is set
         if !trip_file_path.as_os_str().is_empty() {
             if let Some(mut trip) = TripFile::load(&trip_file_path)? {
                 // Reconcile selected items against the current input config
-                let config_items: Vec<(String, String)> = packing_list
+                let config_items: Vec<(String, Vec<String>)> = packing_list
                     .items
                     .iter()
-                    .map(|item| (item.name.clone(), item.category.clone()))
+                    .map(|item| (item.name.clone(), item.categories.clone()))
                     .collect();
                 trip.reconcile(&config_items);
 
@@ -565,7 +1726,6 @@ impl App {
                 weekdays = Weekdays::new(trip.weekdays).unwrap_or(weekdays);
                 travel_style = trip.travel_style;
                 weather = trip.weather;
-                selected_activities = trip.selected_activities;
 
                 // Reset the default selection, then restore from the file
                 for item in &mut packing_list.items {
@@ -603,7 +1763,6 @@ impl App {
             weekdays,
             travel_style,
             weather,
-            selected_activities,
             modifiers: trip_params.modifiers,
             focus: Focus::TripFile,
             collapsed_categories: Vec::new(),
@@ -612,7 +1771,6 @@ impl App {
             input_mode: InputMode::Normal,
             left_scroll: 0,
             right_scroll: 0,
-            activity_cursor: 0,
             trip_file_path,
             trip_file_input: String::new(),
             editing_trip_file: false,
@@ -655,7 +1813,7 @@ impl App {
                     let auto = item.auto_quantity;
                     SavedItem {
                         name: item.name.clone(),
-                        category: item.category.clone(),
+                        categories: item.categories.clone(),
                         quantity: if auto { None } else { Some(item.quantity) },
                         auto_quantity: auto,
                     }
@@ -664,7 +1822,6 @@ impl App {
             weekdays: self.draw_state.weekdays.get(),
             travel_style: self.draw_state.travel_style.clone(),
             weather: self.draw_state.weather.clone(),
-            selected_activities: self.draw_state.selected_activities.clone(),
             modifiers: self.draw_state.modifiers.clone(),
             last_trip_file: if self.draw_state.trip_file_path.as_os_str().is_empty() {
                 // No new path chosen: keep remembering the previous trip file
@@ -700,7 +1857,6 @@ impl App {
             weekdays: self.draw_state.weekdays.get(),
             travel_style: self.draw_state.travel_style.clone(),
             weather: self.draw_state.weather.clone(),
-            selected_activities: self.draw_state.selected_activities.clone(),
             items: self
                 .draw_state
                 .packing_list
@@ -709,7 +1865,7 @@ impl App {
                 .filter(|item| item.editable)
                 .map(|item| TripItem {
                     name: item.name.clone(),
-                    category: item.category.clone(),
+                    category: item.primary_category().to_string(),
                     packed: item.packed,
                 })
                 .collect(),
@@ -724,7 +1880,7 @@ impl App {
             .packing_list
             .items
             .iter()
-            .map(|item| item.category.clone())
+            .flat_map(|item| item.categories.iter().cloned())
             .collect();
         categories.sort();
         categories.dedup();
@@ -746,12 +1902,12 @@ impl App {
         };
 
         // Reconcile selected items against the current input config
-        let config_items: Vec<(String, String)> = self
+        let config_items: Vec<(String, Vec<String>)> = self
             .draw_state
             .packing_list
             .items
             .iter()
-            .map(|item| (item.name.clone(), item.category.clone()))
+            .map(|item| (item.name.clone(), item.categories.clone()))
             .collect();
         trip.reconcile(&config_items);
 
@@ -759,7 +1915,6 @@ impl App {
         self.draw_state.weekdays = Weekdays::new(trip.weekdays).unwrap_or(self.draw_state.weekdays);
         self.draw_state.travel_style = trip.travel_style;
         self.draw_state.weather = trip.weather;
-        self.draw_state.selected_activities = trip.selected_activities;
 
         // Reset the previous trip's selection, then restore from the file
         for item in &mut self.draw_state.packing_list.items {
@@ -784,7 +1939,7 @@ impl App {
             .packing_list
             .items
             .iter()
-            .map(|item| item.category.clone())
+            .flat_map(|item| item.categories.iter().cloned())
             .collect();
         categories.sort();
         categories.dedup();
@@ -823,75 +1978,9 @@ impl App {
         self.draw_state.weather = weather[next].name.clone();
     }
 
-    // Toggle the activity under the cursor on the welcome screen
-    fn toggle_activity(&mut self) {
-        let activities = &self.draw_state.modifiers.activities;
-        let Some(activity) = activities.get(self.draw_state.activity_cursor) else {
-            return;
-        };
-        let name = activity.name.clone();
-        if self.draw_state.selected_activities.contains(&name) {
-            self.draw_state.selected_activities.retain(|a| a != &name);
-        } else {
-            self.draw_state.selected_activities.push(name);
-        }
-        self.update_quantities().ok();
-    }
-
     fn update_quantities(&mut self) -> Result<()> {
-        // Resolve multipliers from the config; fall back to 1.0 for unknown names
-        let style_multiplier = self
-            .draw_state
-            .modifiers
-            .travel_style_multiplier(&self.draw_state.travel_style)
-            .unwrap_or(1.0);
-        let weather_multiplier = self
-            .draw_state
-            .modifiers
-            .weather_multiplier(&self.draw_state.weather)
-            .unwrap_or(1.0);
-        let activity_multipliers: Vec<f32> = self
-            .draw_state
-            .selected_activities
-            .iter()
-            .filter_map(|name| self.draw_state.modifiers.activity_multiplier(name))
-            .collect();
-
-        let item_specs: Vec<ItemQuantitySpec> = self
-            .draw_state
-            .packing_list
-            .items
-            .iter()
-            .map(|item| {
-                if item.auto_quantity {
-                    ItemQuantitySpec::Auto
-                } else {
-                    ItemQuantitySpec::Fixed(item.quantity)
-                }
-            })
-            .collect();
-
-        let input = QuantityCalculationInput {
-            weekdays: self.draw_state.weekdays,
-            item_specs,
-            travel_style: self.draw_state.travel_style.clone(),
-            travel_style_multiplier: style_multiplier,
-            weather: self.draw_state.weather.clone(),
-            weather_multiplier,
-            activities: self.draw_state.selected_activities.clone(),
-            activity_multipliers,
-        };
-
-        let output = self.quantity_calculation.calculate(&input)?;
-
-        // Update item quantities
-        for (i, quantity) in output.item_quantities.iter().enumerate() {
-            if i < self.draw_state.packing_list.items.len() {
-                self.draw_state.packing_list.items[i].quantity = *quantity;
-            }
-        }
-
-        Ok(())
+        self.draw_state
+            .recalculate_quantities(&self.quantity_calculation)
     }
 
     pub fn run(&mut self) -> Result<()> {
@@ -936,6 +2025,7 @@ impl App {
                             name,
                             category,
                             quantity,
+                            auto_quantity: None,
                             category_list,
                             category_index,
                         };
@@ -946,6 +2036,7 @@ impl App {
                         ref name,
                         ref category,
                         ref quantity,
+                        auto_quantity,
                         ref category_list,
                         category_index,
                         ..
@@ -955,6 +2046,7 @@ impl App {
                             name,
                             category,
                             quantity,
+                            auto_quantity: Some(auto_quantity),
                             category_list,
                             category_index,
                         };
@@ -1034,17 +2126,6 @@ impl App {
                 return Ok(false);
             }
 
-            // Left/Right collapse/expand the group under the cursor
-            if self.draw_state.screen == Screen::Main
-                && matches!(self.draw_state.input_mode, InputMode::Normal)
-                && self.draw_state.focus_side == FocusSide::Left
-                && matches!(key.code, KeyCode::Left | KeyCode::Right)
-            {
-                let collapse = key.code == KeyCode::Left;
-                self.set_category_collapsed(collapse);
-                return Ok(false);
-            }
-
             // Left/Right adjust the value of the focused welcome field
             if self.draw_state.screen == Screen::Welcome
                 && !self.draw_state.editing_trip_file
@@ -1072,13 +2153,6 @@ impl App {
                     Focus::Weather => {
                         self.cycle_weather(direction);
                         self.update_quantities()?;
-                    }
-                    Focus::Activities => {
-                        let count = self.draw_state.modifiers.activities.len();
-                        let cursor = self.draw_state.activity_cursor as i32 + direction;
-                        if cursor >= 0 && (cursor as usize) < count {
-                            self.draw_state.activity_cursor = cursor as usize;
-                        }
                     }
                 }
                 return Ok(false);
@@ -1243,24 +2317,31 @@ impl App {
                                     name,
                                     category,
                                     quantity,
+                                    auto_quantity,
                                     category_index,
+                                    selected_categories,
                                     ..
                                 } => {
-                                    // Get the selected category from the list
-                                    let categories = self.get_all_categories();
-                                    let selected_category = if *category_index < categories.len() {
-                                        categories[*category_index].clone()
-                                    } else if !categories.is_empty() {
-                                        categories[0].clone()
+                                    // The membership set from the dialog's
+                                    // multi-select; fall back to the single
+                                    // category when empty (never saved empty)
+                                    let categories = if !selected_categories.is_empty() {
+                                        selected_categories.clone()
                                     } else {
-                                        category.clone()
+                                        let all = self.get_all_categories();
+                                        if *category_index < all.len() {
+                                            vec![all[*category_index].clone()]
+                                        } else {
+                                            vec![category.clone()]
+                                        }
                                     };
                                     // Save the edited item
                                     self.save_edited_item(
                                         *index,
                                         name.clone(),
-                                        selected_category,
+                                        categories,
                                         quantity.clone(),
+                                        *auto_quantity,
                                     );
                                     self.draw_state.input_mode = InputMode::Normal;
                                 }
@@ -1296,7 +2377,8 @@ impl App {
                                 *field = match field {
                                     InputField::Name => InputField::Category,
                                     InputField::Category => InputField::Quantity,
-                                    InputField::Quantity => InputField::Name,
+                                    InputField::Quantity => InputField::Mode,
+                                    InputField::Mode => InputField::Name,
                                 };
                             }
                             InputMode::EditingItem { field, .. } => {
@@ -1304,7 +2386,8 @@ impl App {
                                 *field = match field {
                                     InputField::Name => InputField::Category,
                                     InputField::Category => InputField::Quantity,
-                                    InputField::Quantity => InputField::Name,
+                                    InputField::Quantity => InputField::Mode,
+                                    InputField::Mode => InputField::Name,
                                 };
                             }
                             _ => {}
@@ -1349,11 +2432,6 @@ impl App {
                         } else {
                             // Toggle packed status on right side
                             self.toggle_item_packed_right_side();
-                        }
-                    } else if self.draw_state.screen == Screen::Welcome {
-                        // Toggle the activity under the cursor
-                        if self.draw_state.focus == Focus::Activities {
-                            self.toggle_activity();
                         }
                     } else if self.draw_state.screen == Screen::Main {
                         // Handle space in edit mode for category selection
@@ -1406,6 +2484,15 @@ impl App {
                             self.draw_state.input_mode =
                                 InputMode::ConfirmDelete { index: item_index };
                         }
+                    }
+                }
+                KeyCode::Char('r') | KeyCode::Char('R') => {
+                    // Recalculate the current list's quantities (spec 018):
+                    // works from both list views, unbound everywhere else
+                    if self.draw_state.screen == Screen::Main
+                        && matches!(self.draw_state.input_mode, InputMode::Normal)
+                    {
+                        self.update_quantities()?;
                     }
                 }
                 KeyCode::Up => {
@@ -1462,96 +2549,25 @@ impl App {
         Ok(false)
     }
     fn handle_up(&mut self) -> Result<()> {
-        match self.draw_state.screen {
-            Screen::Welcome => {
-                // Up/Down navigate between fields; Left/Right adjust values
-                self.draw_state.focus = self.draw_state.focus.prev();
-            }
-            Screen::Config | Screen::ConfigEditor => {}
-            Screen::Main => {
-                if matches!(self.draw_state.input_mode, InputMode::Normal) {
-                    // Navigate up through the visible rows of the focused side
-                    if self.draw_state.selected_index > 0 {
-                        self.draw_state.selected_index -= 1;
-                    }
-                    // Keep the left panel in sync when navigating the final list
-                    if self.draw_state.focus_side == FocusSide::Right {
-                        self.sync_left_view_to_right_cursor();
-                    }
-                } else if let InputMode::AddingItem {
-                    field,
-                    category_index,
-                    ..
-                } = &mut self.draw_state.input_mode
-                {
-                    // Only navigate category dropdown when category field is selected
-                    if *field == InputField::Category && *category_index > 0 {
-                        *category_index -= 1;
-                    }
-                } else if let InputMode::EditingItem {
-                    field,
-                    category_index,
-                    ..
-                } = &mut self.draw_state.input_mode
-                {
-                    // Only navigate category dropdown when category field is selected
-                    if *field == InputField::Category && *category_index > 0 {
-                        *category_index -= 1;
-                    }
-                }
-            }
-            Screen::Help => {}
+        self.draw_state.move_cursor_up();
+        // Keep the left panel in sync when navigating the final list
+        if self.draw_state.screen == Screen::Main
+            && matches!(self.draw_state.input_mode, InputMode::Normal)
+            && self.draw_state.focus_side == FocusSide::Right
+        {
+            self.sync_left_view_to_right_cursor();
         }
         Ok(())
     }
 
     fn handle_down(&mut self) -> Result<()> {
-        match self.draw_state.screen {
-            Screen::Welcome => {
-                // Up/Down navigate between fields; Left/Right adjust values
-                self.draw_state.focus = self.draw_state.focus.next();
-            }
-            Screen::Config | Screen::ConfigEditor => {}
-            Screen::Main => {
-                if matches!(self.draw_state.input_mode, InputMode::Normal) {
-                    // Navigate down through the visible rows of the focused side
-                    let rows = self.draw_state.active_rows();
-                    if self.draw_state.selected_index < rows.len().saturating_sub(1) {
-                        self.draw_state.selected_index += 1;
-                    }
-                    // Keep the left panel in sync when navigating the final list
-                    if self.draw_state.focus_side == FocusSide::Right {
-                        self.sync_left_view_to_right_cursor();
-                    }
-                } else if let InputMode::AddingItem {
-                    field,
-                    category_index,
-                    category_list,
-                    ..
-                } = &mut self.draw_state.input_mode
-                {
-                    // Only navigate category dropdown when category field is selected
-                    if *field == InputField::Category
-                        && *category_index < category_list.len().saturating_sub(1)
-                    {
-                        *category_index += 1;
-                    }
-                } else if let InputMode::EditingItem {
-                    field,
-                    category_index,
-                    category_list,
-                    ..
-                } = &mut self.draw_state.input_mode
-                {
-                    // Only navigate category dropdown when category field is selected
-                    if *field == InputField::Category
-                        && *category_index < category_list.len().saturating_sub(1)
-                    {
-                        *category_index += 1;
-                    }
-                }
-            }
-            Screen::Help => {}
+        self.draw_state.move_cursor_down();
+        // Keep the left panel in sync when navigating the final list
+        if self.draw_state.screen == Screen::Main
+            && matches!(self.draw_state.input_mode, InputMode::Normal)
+            && self.draw_state.focus_side == FocusSide::Right
+        {
+            self.sync_left_view_to_right_cursor();
         }
         Ok(())
     }
@@ -1564,7 +2580,6 @@ impl App {
         match section {
             ConfigSection::TravelStyles => &self.draw_state.modifiers.travel_styles,
             ConfigSection::Weather => &self.draw_state.modifiers.weather,
-            ConfigSection::Activities => &self.draw_state.modifiers.activities,
         }
     }
 
@@ -1575,7 +2590,6 @@ impl App {
         match section {
             ConfigSection::TravelStyles => &mut self.draw_state.modifiers.travel_styles,
             ConfigSection::Weather => &mut self.draw_state.modifiers.weather,
-            ConfigSection::Activities => &mut self.draw_state.modifiers.activities,
         }
     }
 
@@ -1714,7 +2728,6 @@ impl App {
         self.draw_state.weekdays = trip_params.weekdays;
         self.draw_state.travel_style = trip_params.travel_style;
         self.draw_state.weather = trip_params.weather;
-        self.draw_state.selected_activities = trip_params.selected_activities;
         self.draw_state.modifiers = trip_params.modifiers;
 
         // Restore the trip state for items that still exist (by name)
@@ -1898,15 +2911,15 @@ impl App {
                 .map(|m| m.name.clone())
                 .unwrap_or_default();
         }
-        self.draw_state.selected_activities.retain(|name| {
-            self.draw_state
-                .modifiers
-                .activity_multiplier(name)
-                .is_some()
-        });
     }
 
     fn handle_add_edit_input(&mut self, key: event::KeyEvent) {
+        // Left/Right cycle the category selection (uniform arrow model)
+        if matches!(key.code, KeyCode::Left | KeyCode::Right) {
+            let direction = if key.code == KeyCode::Right { 1 } else { -1 };
+            self.draw_state.cycle_category_selection(direction);
+            return;
+        }
         match &mut self.draw_state.input_mode {
             InputMode::AddingItem {
                 field,
@@ -1919,6 +2932,7 @@ impl App {
                     InputField::Name => name.push(c),
                     InputField::Category => category.push(c),
                     InputField::Quantity => quantity.push(c),
+                    InputField::Mode => {}
                 },
                 KeyCode::Backspace => match field {
                     InputField::Name => {
@@ -1930,6 +2944,7 @@ impl App {
                     InputField::Quantity => {
                         quantity.pop();
                     }
+                    InputField::Mode => {}
                 },
                 _ => {}
             },
@@ -1938,12 +2953,37 @@ impl App {
                 name,
                 category,
                 quantity,
+                category_list,
+                category_index,
+                selected_categories,
                 ..
             } => match key.code {
+                KeyCode::Char(' ') => match field {
+                    // Space toggles the quantity mode in the Mode field
+                    InputField::Mode => self.draw_state.toggle_edit_mode(),
+                    // Space toggles membership of the highlighted category
+                    InputField::Category => {
+                        if let Some(highlighted) = category_list.get(*category_index) {
+                            let highlighted = highlighted.clone();
+                            if let Some(pos) =
+                                selected_categories.iter().position(|c| c == &highlighted)
+                            {
+                                // Keep at least one membership
+                                if selected_categories.len() > 1 {
+                                    selected_categories.remove(pos);
+                                }
+                            } else {
+                                selected_categories.push(highlighted);
+                            }
+                        }
+                    }
+                    _ => {}
+                },
                 KeyCode::Char(c) => match field {
                     InputField::Name => name.push(c),
                     InputField::Category => category.push(c),
                     InputField::Quantity => quantity.push(c),
+                    InputField::Mode => {}
                 },
                 KeyCode::Backspace => match field {
                     InputField::Name => {
@@ -1955,6 +2995,7 @@ impl App {
                     InputField::Quantity => {
                         quantity.pop();
                     }
+                    InputField::Mode => {}
                 },
                 _ => {}
             },
@@ -1964,103 +3005,28 @@ impl App {
 
     // The item currently selected on the focused side, if the cursor is on an item row
     fn current_item_index(&self) -> Option<usize> {
-        let rows = self.draw_state.active_rows();
-        match rows.get(self.draw_state.selected_index) {
-            Some(PanelRow::Item(index)) => Some(*index),
-            _ => None,
-        }
+        self.draw_state.cursor_item_index()
     }
 
     // The category the cursor is on (header row or one of its items)
     fn current_category(&self) -> Option<String> {
-        let rows = self.draw_state.active_rows();
-        match rows.get(self.draw_state.selected_index) {
-            Some(PanelRow::Category(c)) => Some(c.clone()),
-            Some(PanelRow::Item(index)) => {
-                Some(self.draw_state.packing_list.items[*index].category.clone())
-            }
-            None => None,
-        }
-    }
-
-    // Collapse (true) or expand (false) the category under the cursor.
-    // When collapsing, the cursor moves to the category's header row so it
-    // stays visible.
-    fn set_category_collapsed(&mut self, collapsed: bool) {
-        let Some(category) = self.current_category() else {
-            return;
-        };
-
-        if collapsed {
-            if !self.draw_state.collapsed_categories.contains(&category) {
-                self.draw_state.collapsed_categories.push(category.clone());
-            }
-            // Move the cursor to the category's header row
-            let rows = self.draw_state.active_rows();
-            if let Some(row) = rows
-                .iter()
-                .position(|r| matches!(r, PanelRow::Category(c) if *c == category))
-            {
-                self.draw_state.selected_index = row;
-            }
-        } else {
-            self.draw_state
-                .collapsed_categories
-                .retain(|c| c != &category);
-        }
+        self.draw_state.cursor_category()
     }
 
     fn toggle_category_collapse(&mut self) {
-        // Toggle collapse of the category the cursor is on
-        let collapsed = self
-            .current_category()
-            .map(|c| self.draw_state.collapsed_categories.contains(&c))
-            .unwrap_or(false);
-        self.set_category_collapsed(!collapsed);
+        self.draw_state.toggle_category_collapse();
     }
 
     fn toggle_item_selection(&mut self) {
-        // Toggle selection of the currently selected item
-        if let Some(item_index) = self.current_item_index() {
-            let item = &mut self.draw_state.packing_list.items[item_index];
-            item.editable = !item.editable;
-        }
+        self.draw_state.toggle_item_selection();
     }
 
     fn toggle_category_selection(&mut self) {
-        // Toggle selection of all items in the current category, then
-        // collapse the group when items were added to the trip and expand
-        // it when they were removed
-        let Some(category) = self.current_category() else {
-            return;
-        };
-
-        let was_selected = self
-            .draw_state
-            .packing_list
-            .items
-            .iter()
-            .any(|item| item.category == category && item.editable);
-
-        for item in &mut self.draw_state.packing_list.items {
-            if item.category == category {
-                item.editable = !item.editable;
-            }
-        }
-
-        // Follow the selection state: added -> collapse, removed -> expand
-        let now_selected = !was_selected;
-        self.set_category_collapsed(!now_selected);
+        self.draw_state.toggle_category_selection();
     }
 
     fn toggle_item_packed_right_side(&mut self) {
-        // Only toggle packed status when on right side
-        if self.draw_state.focus_side == FocusSide::Right
-            && let Some(item_index) = self.current_item_index()
-        {
-            self.draw_state.packing_list.items[item_index].packed =
-                !self.draw_state.packing_list.items[item_index].packed;
-        }
+        self.draw_state.toggle_item_packed();
     }
 
     /// After navigating on the right panel: collapse all categories on the
@@ -2071,8 +3037,8 @@ impl App {
             return;
         };
         let category = self.draw_state.packing_list.items[item_index]
-            .category
-            .clone();
+            .primary_category()
+            .to_string();
 
         // Collapse everything, then expand only the cursor's category
         let all_categories: Vec<String> = self
@@ -2080,7 +3046,7 @@ impl App {
             .packing_list
             .items
             .iter()
-            .map(|item| item.category.clone())
+            .flat_map(|item| item.categories.iter().cloned())
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
@@ -2096,17 +3062,19 @@ impl App {
             let categories = self.get_all_categories();
             let category_index = categories
                 .iter()
-                .position(|c| c == &item.category)
+                .position(|c| c == item.primary_category())
                 .unwrap_or(0);
 
             self.draw_state.input_mode = InputMode::EditingItem {
                 index: item_index,
                 field: InputField::Name,
                 name: item.name.clone(),
-                category: item.category.clone(),
+                category: item.primary_category().to_string(),
                 quantity: item.quantity.to_string(),
+                auto_quantity: item.auto_quantity,
                 category_list: categories,
                 category_index,
+                selected_categories: item.categories.clone(),
             };
         }
     }
@@ -2125,7 +3093,9 @@ impl App {
         let new_category = if category.is_empty() {
             // Use first category or default
             if !self.draw_state.packing_list.items.is_empty() {
-                self.draw_state.packing_list.items[0].category.clone()
+                self.draw_state.packing_list.items[0]
+                    .primary_category()
+                    .to_string()
             } else {
                 "Other".to_string()
             }
@@ -2135,7 +3105,7 @@ impl App {
 
         self.draw_state
             .packing_list
-            .add_item(Item::new(new_id, new_name, new_category, qty));
+            .add_item(Item::new(new_id, new_name, vec![new_category], qty));
 
         // Update quantities for the new item
         self.update_quantities().ok();
@@ -2149,23 +3119,24 @@ impl App {
             (self.draw_state.packing_list.items.len() - 1).min(rows.len().saturating_sub(1));
     }
 
-    fn save_edited_item(&mut self, index: usize, name: String, category: String, quantity: String) {
-        if index < self.draw_state.packing_list.items.len() {
-            let item = &mut self.draw_state.packing_list.items[index];
-
-            // Update fields if they're not empty
-            if !name.is_empty() {
-                item.name = name;
-            }
-            if !category.is_empty() {
-                item.category = category;
-            }
-            if let Ok(qty) = quantity.parse::<u32>() {
-                item.quantity = qty;
-            }
-
-            // Save config after editing
-            self.save_config().ok();
+    fn save_edited_item(
+        &mut self,
+        index: usize,
+        name: String,
+        categories: Vec<String>,
+        quantity: String,
+        auto_quantity: bool,
+    ) {
+        let was_auto = index < self.draw_state.packing_list.items.len()
+            && self.draw_state.packing_list.items[index].auto_quantity;
+        self.draw_state
+            .apply_item_edit(index, name, categories, quantity, Some(auto_quantity));
+        // Save config after editing
+        self.save_config().ok();
+        // When the item stays automatic, recalculate so the quantity
+        // reflects the trip parameters rather than a stale dialog value
+        if was_auto && auto_quantity {
+            self.update_quantities().ok();
         }
     }
 
@@ -2187,7 +3158,6 @@ struct TripParams {
     weekdays: Weekdays,
     travel_style: String,
     weather: String,
-    selected_activities: Vec<String>,
     modifiers: ModifiersConfig,
     last_trip_file: Option<String>,
 }
@@ -2209,7 +3179,12 @@ fn load_config(config_file: &PathBuf) -> Result<(PackingList, TripParams)> {
         } else {
             saved_item.quantity.unwrap_or(1)
         };
-        let mut item = Item::new(new_id, saved_item.name, saved_item.category, fixed_quantity);
+        let mut item = Item::new(
+            new_id,
+            saved_item.name,
+            saved_item.categories,
+            fixed_quantity,
+        );
         item.auto_quantity = auto;
         packing_list.add_item(item);
     }
@@ -2219,7 +3194,6 @@ fn load_config(config_file: &PathBuf) -> Result<(PackingList, TripParams)> {
         weekdays,
         travel_style: config.travel_style,
         weather: config.weather,
-        selected_activities: config.selected_activities,
         modifiers: config.modifiers,
         last_trip_file: config.last_trip_file,
     };
@@ -2255,7 +3229,7 @@ fn create_default_config(config_file: &PathBuf) -> Result<(PackingList, TripPara
         packing_list.add_item(Item::new(
             new_id,
             name.to_string(),
-            category.to_string(),
+            vec![category.to_string()],
             quantity,
         ));
     }
@@ -2265,7 +3239,6 @@ fn create_default_config(config_file: &PathBuf) -> Result<(PackingList, TripPara
         weekdays: Weekdays::default(),
         travel_style: default_travel_style_name(),
         weather: default_weather_name(),
-        selected_activities: Vec::new(),
         modifiers: ModifiersConfig::default(),
         last_trip_file: None,
     };
@@ -2288,7 +3261,7 @@ fn create_default_config(config_file: &PathBuf) -> Result<(PackingList, TripPara
                 let auto = item.auto_quantity;
                 SavedItem {
                     name: item.name.clone(),
-                    category: item.category.clone(),
+                    categories: item.categories.clone(),
                     quantity: if auto { None } else { Some(item.quantity) },
                     auto_quantity: auto,
                 }
@@ -2297,7 +3270,6 @@ fn create_default_config(config_file: &PathBuf) -> Result<(PackingList, TripPara
         weekdays: trip_params.weekdays.get(),
         travel_style: trip_params.travel_style.clone(),
         weather: trip_params.weather.clone(),
-        selected_activities: trip_params.selected_activities.clone(),
         modifiers: trip_params.modifiers.clone(),
         last_trip_file: None,
     };
@@ -2381,7 +3353,6 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
         .direction(Direction::Vertical)
         .margin(0)
         .constraints([
-            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
@@ -2485,78 +3456,9 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
     f.render_widget(weather_block, params_layout[3]);
     f.render_widget(weather_para, inner(params_layout[3]));
 
-    // Activities (multi-select, scrollable)
-    let activities_block = Block::default()
-        .title("Activities")
-        .borders(Borders::ALL)
-        .border_style(if state.focus == Focus::Activities {
-            Style::new().fg(Color::Yellow)
-        } else {
-            Style::new()
-        });
-
-    let activities_area = params_layout[4];
-    let activities_inner = inner(activities_area);
-
-    // Window the activity list so the cursor stays visible
-    let viewport_height = activities_inner.height as usize;
-    let activity_scroll = if state.activity_cursor >= viewport_height {
-        state.activity_cursor + 1 - viewport_height
-    } else {
-        0
-    };
-
-    let activity_lines: Vec<Line> = state
-        .modifiers
-        .activities
-        .iter()
-        .enumerate()
-        .skip(activity_scroll)
-        .take(viewport_height)
-        .map(|(i, activity)| {
-            let is_selected = state.selected_activities.contains(&activity.name);
-            let is_cursor = state.focus == Focus::Activities && i == state.activity_cursor;
-            let symbol = if is_selected { "[x] " } else { "[ ] " };
-            let mut line = Line::from(vec![
-                Span::raw(" "),
-                Span::raw(symbol),
-                Span::raw(capitalize_first(&activity.name)),
-            ]);
-            if is_cursor {
-                line = line.style(Style::new().fg(Color::Yellow).bg(Color::DarkGray));
-            } else if is_selected {
-                line = line.style(Style::new().fg(Color::Green));
-            }
-            line
-        })
-        .collect();
-
-    let activities_para = Paragraph::new(activity_lines);
-    f.render_widget(activities_block, activities_area);
-    f.render_widget(activities_para, activities_inner);
-
     // Instructions
-    let instructions = Paragraph::new(vec![
-        Line::from(vec![
-            Span::raw("Up/Down").bold().fg(Color::Yellow),
-            Span::raw(" to navigate fields"),
-        ]),
-        Line::from(vec![
-            Span::raw("Left/Right").bold().fg(Color::Yellow),
-            Span::raw(" to change values"),
-        ]),
-        Line::from(vec![
-            Span::raw("O").bold().fg(Color::Yellow),
-            Span::raw(" config | "),
-            Span::raw("Ctrl+E").bold().fg(Color::Yellow),
-            Span::raw(" edit config file"),
-        ]),
-        Line::from(vec![
-            Span::raw("q").bold().fg(Color::Red),
-            Span::raw(" to quit"),
-        ]),
-    ])
-    .wrap(Wrap { trim: true });
+    let instructions =
+        Paragraph::new(hint_line(hint_entries(HintSurface::Welcome))).wrap(Wrap { trim: true });
     f.render_widget(instructions, instructions_area);
 
     // Resume prompt for the remembered trip file
@@ -2627,6 +3529,302 @@ fn draw_main_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &mut App
     draw_selected_items_panel(f, right_area, state);
 }
 
+/// The surfaces that carry a navigation hint line.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum HintSurface {
+    LeftPanel,
+    RightPanel,
+    Welcome,
+    Config,
+    AddEditPopup,
+    DeletePopup,
+    ModifierEditor,
+    RawEditor,
+}
+
+/// The hint entries for a surface: (key, action) pairs rendered by
+/// `hint_line`. Single source for rendering and the extraction test.
+fn hint_entries(surface: HintSurface) -> &'static [(&'static str, &'static str)] {
+    match surface {
+        HintSurface::LeftPanel => &[
+            ("↑/↓", "Navigate"),
+            ("Space", "Select"),
+            ("Ctrl+Space", "Category"),
+            ("A", "Add"),
+            ("E", "Edit"),
+            ("D", "Delete"),
+            ("C", "Collapse"),
+            ("R", "Recalculate"),
+            ("Tab", "Switch"),
+            ("?", "Help"),
+        ],
+        HintSurface::RightPanel => &[
+            ("↑/↓", "Navigate"),
+            ("Space", "Packed"),
+            ("R", "Recalculate"),
+            ("Tab", "Switch"),
+            ("?", "Help"),
+        ],
+        HintSurface::Welcome => &[
+            ("↑/↓", "Navigate fields"),
+            ("←/→", "Adjust values"),
+            ("+/-", "Weekdays"),
+            ("Enter", "Edit file / Continue"),
+            ("F", "Edit path"),
+            ("O", "Config"),
+            ("Ctrl+E", "Raw editor"),
+            ("q", "Quit"),
+        ],
+        HintSurface::Config => &[
+            ("Tab", "Section"),
+            ("↑/↓", "Move"),
+            ("A", "Add"),
+            ("E", "Edit"),
+            ("D", "Delete"),
+            ("Ctrl+E", "Raw editor"),
+            ("Esc", "Back"),
+        ],
+        HintSurface::AddEditPopup => &[
+            ("Tab", "Cycle fields"),
+            ("↑/↓", "Category dropdown"),
+            ("←/→", "Cycle category"),
+            ("Space", "Mode / Category"),
+            ("Enter", "Save"),
+            ("Esc", "Cancel"),
+        ],
+        HintSurface::DeletePopup => &[("Enter", "Confirm"), ("Esc", "Cancel")],
+        HintSurface::ModifierEditor => &[
+            ("Tab", "Switch field"),
+            ("Enter", "Save"),
+            ("Esc", "Cancel"),
+        ],
+        HintSurface::RawEditor => &[
+            ("↑/↓/←/→", "Cursor"),
+            ("Home/End", "Line start/end"),
+            ("Enter", "New line"),
+            ("Backspace", "Delete"),
+            ("Ctrl+S", "Save & apply"),
+            ("Esc", "Cancel"),
+        ],
+    }
+}
+
+/// The single hint-line constructor: keys in the highlight color and
+/// bold, actions plain, " | " between entries.
+fn hint_line(entries: &[(&'static str, &'static str)]) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (i, (key, action)) in entries.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(" | "));
+        }
+        spans.push(Span::raw(*key).bold().fg(Color::Yellow));
+        spans.push(Span::raw(" "));
+        spans.push(Span::raw(*action));
+    }
+    Line::from(spans)
+}
+
+/// The rendered width of one hint entry ("KEY Action").
+fn hint_entry_width(key: &str, action: &str) -> usize {
+    key.chars().count() + 1 + action.chars().count()
+}
+
+/// Split a surface's hint entries into rows that each fit `width`
+/// columns, packing entries greedily and breaking only at entry
+/// boundaries so no binding is ever cut off. Every entry appears
+/// exactly once across the rows.
+fn hint_rows(entries: &[(&'static str, &'static str)], width: usize) -> Vec<Line<'static>> {
+    let mut rows = Vec::new();
+    let mut current: Vec<(&'static str, &'static str)> = Vec::new();
+    let mut current_width = 0;
+    for entry in entries {
+        let entry_width = hint_entry_width(entry.0, entry.1);
+        let separator = if current.is_empty() { 0 } else { 3 };
+        if !current.is_empty() && current_width + separator + entry_width > width {
+            rows.push(hint_line(&current));
+            current = Vec::new();
+            current_width = 0;
+        }
+        current_width += if current.is_empty() { 0 } else { 3 };
+        current_width += entry_width;
+        current.push(*entry);
+    }
+    if !current.is_empty() {
+        rows.push(hint_line(&current));
+    }
+    if rows.is_empty() {
+        // An empty entry list still renders one (blank) hint line so
+        // the footer area is never zero-height.
+        rows.push(Line::from(""));
+    }
+    rows
+}
+
+// The binding tokens the help screen must list; the extraction test
+// compares this against the handler bindings (SC-004).
+#[cfg(test)]
+fn help_binding_tokens() -> Vec<&'static str> {
+    vec![
+        // Global
+        "Ctrl+C",
+        "Ctrl+E",
+        "q",
+        "?",
+        "O",
+        // Welcome
+        "↑/↓",
+        "←/→",
+        "+/-",
+        "Space",
+        "Enter",
+        "F",
+        "Esc",
+        // Resume prompt
+        "Y",
+        "N",
+        // Main screen
+        "Tab",
+        "BackTab",
+        "Ctrl+Space",
+        "C",
+        "A",
+        "E",
+        "D",
+        "R",
+        // Add/Edit dialog
+        "Mode",
+        // Config screen
+        // (Tab/BackTab/↑/↓/A/E/D/Esc shared with above tokens)
+        // Modifier editor
+        // (Tab/Enter/Esc shared with above tokens)
+        // Raw config editor
+        "↑/↓/←/→",
+        "Home/End",
+        "Backspace",
+        "Ctrl+S",
+    ]
+}
+
+// The help screen's content as plain text, for the completeness test.
+#[cfg(test)]
+fn help_screen_text() -> String {
+    let help_text = help_content();
+    let mut text = String::new();
+    for line in &help_text {
+        for span in &line.spans {
+            text.push_str(&span.content);
+        }
+        text.push('\n');
+    }
+    text
+}
+
+// The help screen's content, shared by the renderer and the
+// completeness test.
+fn help_content() -> Vec<Line<'static>> {
+    fn key_span(k: &'static str) -> Span<'static> {
+        Span::raw(k).bold().fg(Color::Yellow)
+    }
+    fn quit_key_span(k: &'static str) -> Span<'static> {
+        Span::raw(k).bold().fg(Color::Red)
+    }
+    fn entry(k: &'static str, d: &'static str) -> Line<'static> {
+        Line::from(vec![key_span(k), Span::raw(" - "), Span::raw(d)])
+    }
+    fn quit_entry(k: &'static str, d: &'static str) -> Line<'static> {
+        Line::from(vec![quit_key_span(k), Span::raw(" - "), Span::raw(d)])
+    }
+    fn section(t: &'static str, c: Color) -> Line<'static> {
+        Line::from(Span::raw(t).bold().fg(c))
+    }
+    fn blank() -> Line<'static> {
+        Line::from("")
+    }
+
+    vec![
+        section("GLOBAL (any screen):", Color::Yellow),
+        entry("Ctrl+C", "Quit immediately (saves config and trip file)"),
+        entry("Ctrl+E", "Open the raw config file editor"),
+        quit_entry("q", "Quit (saves config and trip file)"),
+        entry("?", "Show this help (Main and Welcome screens)"),
+        entry("O", "Open the configuration screen (modifiers)"),
+        blank(),
+        section("WELCOME SCREEN:", Color::Yellow),
+        entry(
+            "↑/↓",
+            "Move focus between fields (file, weekdays, style, weather)",
+        ),
+        entry(
+            "←/→",
+            "Adjust the focused value (weekdays, cycle style/weather)",
+        ),
+        entry("+/-", "Adjust weekdays"),
+        entry(
+            "Enter",
+            "Edit file name (on file field) / Continue to main screen",
+        ),
+        entry("F", "Edit the trip file path"),
+        quit_entry("Esc", "Quit"),
+        blank(),
+        section("RESUME PROMPT:", Color::Yellow),
+        entry("Y / Enter", "Resume the previous trip file"),
+        entry("N / Esc", "Start a fresh list"),
+        blank(),
+        section("MAIN SCREEN (normal mode):", Color::Green),
+        entry("↑/↓", "Move the cursor through the focused panel's rows"),
+        entry("Tab / BackTab", "Switch focus between panels"),
+        entry("Space", "Toggle selection (left) / toggle packed (right)"),
+        entry("Ctrl+Space", "Toggle the category's selection (left panel)"),
+        entry(
+            "C",
+            "Toggle collapse/expand of the category under the cursor",
+        ),
+        entry("A", "Add a new item"),
+        entry("E", "Edit the item under the cursor"),
+        entry("D", "Delete the item under the cursor (with confirmation)"),
+        entry("R", "Recalculate quantities on the current list"),
+        quit_entry("Esc", "Quit"),
+        blank(),
+        section("ADD/EDIT ITEM DIALOG:", Color::Yellow),
+        entry(
+            "Tab",
+            "Cycle fields: Name -> Category -> Quantity -> Mode -> Name",
+        ),
+        entry(
+            "↑/↓",
+            "Move the category dropdown highlight (category field)",
+        ),
+        entry("←/→", "Cycle the category selection (category field)"),
+        entry("Space", "Toggle the quantity mode (Mode field)"),
+        entry("Enter", "Save"),
+        quit_entry("Esc", "Cancel"),
+        blank(),
+        section("CONFIG SCREEN (modifiers):", Color::Yellow),
+        entry("Tab / BackTab", "Switch section (travel styles / weather)"),
+        entry("↑/↓", "Move the modifier cursor"),
+        entry("A", "Add a modifier"),
+        entry("E", "Edit the modifier under the cursor"),
+        entry("D", "Delete the modifier under the cursor"),
+        quit_entry(
+            "Esc",
+            "Close the modifier editor if open; otherwise leave the config screen",
+        ),
+        blank(),
+        section("MODIFIER EDITOR POPUP:", Color::Yellow),
+        entry("Tab", "Switch between name and multiplier field"),
+        entry("Enter", "Save the modifier"),
+        quit_entry("Esc", "Cancel the editor"),
+        blank(),
+        section("RAW CONFIG EDITOR (Ctrl+E):", Color::Yellow),
+        entry("↑/↓/←/→", "Move the text cursor"),
+        entry("Home/End", "Cursor to line start / end"),
+        entry("Enter", "Insert a new line"),
+        entry("Backspace", "Delete backward"),
+        entry("Ctrl+S", "Save and apply (validates YAML first)"),
+        quit_entry("Esc", "Discard edits and return"),
+    ]
+}
+
 fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
     let block = Block::default()
         .title("Help - Navigation & Controls")
@@ -2641,173 +3839,7 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
         height: size.height - 2,
     };
 
-    let help_text = vec![
-        Line::from(vec![Span::raw("WELCOME SCREEN:").bold().fg(Color::Yellow)]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("Up/Down").bold().fg(Color::Yellow),
-            Span::raw(" - Navigate between fields"),
-        ]),
-        Line::from(vec![
-            Span::raw("Left/Right").bold().fg(Color::Yellow),
-            Span::raw(" - Adjust weekdays / Cycle options / Move activity cursor"),
-        ]),
-        Line::from(vec![
-            Span::raw("+/-").bold().fg(Color::Yellow),
-            Span::raw(" - Adjust weekdays"),
-        ]),
-        Line::from(vec![
-            Span::raw("Space").bold().fg(Color::Yellow),
-            Span::raw(" - Toggle activity (in Activities section)"),
-        ]),
-        Line::from(vec![
-            Span::raw("Enter").bold().fg(Color::Yellow),
-            Span::raw(" - Edit file name (on file field) / Continue to main screen"),
-        ]),
-        Line::from(vec![
-            Span::raw("O").bold().fg(Color::Yellow),
-            Span::raw(" - Open configuration (modifiers)"),
-        ]),
-        Line::from(vec![
-            Span::raw("Ctrl+E").bold().fg(Color::Yellow),
-            Span::raw(" - Edit the raw config file (from any screen)"),
-        ]),
-        Line::from(vec![
-            Span::raw("Tab").bold().fg(Color::Yellow),
-            Span::raw(" - Navigate between fields"),
-        ]),
-        Line::from(vec![
-            Span::raw("Enter").bold().fg(Color::Yellow),
-            Span::raw(" - Continue to main screen"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::raw("CONFIG SCREEN:").bold().fg(Color::Yellow)]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("Tab").bold().fg(Color::Yellow),
-            Span::raw(" - Switch section (styles/weather/activities)"),
-        ]),
-        Line::from(vec![
-            Span::raw("A/E/D").bold().fg(Color::Yellow),
-            Span::raw(" - Add / Edit / Delete modifier"),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("CONFIG FILE EDITOR (Ctrl+E):")
-                .bold()
-                .fg(Color::Yellow),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("↑/↓/←/→").bold().fg(Color::Yellow),
-            Span::raw(" - Move cursor"),
-        ]),
-        Line::from(vec![
-            Span::raw("Enter").bold().fg(Color::Yellow),
-            Span::raw(" - New line | "),
-            Span::raw("Backspace").bold().fg(Color::Yellow),
-            Span::raw(" - Delete"),
-        ]),
-        Line::from(vec![
-            Span::raw("Ctrl+S").bold().fg(Color::Yellow),
-            Span::raw(" - Save & apply (validates YAML first)"),
-        ]),
-        Line::from(vec![
-            Span::raw("Esc").bold().fg(Color::Red),
-            Span::raw(" - Cancel and return"),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("LEFT PANEL (All Items):").bold().fg(Color::Green),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("↑/↓").bold().fg(Color::Yellow),
-            Span::raw(" - Navigate items"),
-        ]),
-        Line::from(vec![
-            Span::raw("Space").bold().fg(Color::Yellow),
-            Span::raw(" - Toggle item selection"),
-        ]),
-        Line::from(vec![
-            Span::raw("Ctrl+Space").bold().fg(Color::Yellow),
-            Span::raw(" - Toggle all items in category"),
-        ]),
-        Line::from(vec![
-            Span::raw("A").bold().fg(Color::Yellow),
-            Span::raw(" - Add new item"),
-        ]),
-        Line::from(vec![
-            Span::raw("E").bold().fg(Color::Yellow),
-            Span::raw(" - Edit selected item"),
-        ]),
-        Line::from(vec![
-            Span::raw("D").bold().fg(Color::Yellow),
-            Span::raw(" - Delete selected item (with confirmation)"),
-        ]),
-        Line::from(vec![
-            Span::raw("C").bold().fg(Color::Yellow),
-            Span::raw(" - Collapse/expand category"),
-        ]),
-        Line::from(vec![
-            Span::raw("←/→").bold().fg(Color::Yellow),
-            Span::raw(" - Collapse/expand the group under the cursor"),
-        ]),
-        Line::from(vec![
-            Span::raw("Tab").bold().fg(Color::Yellow),
-            Span::raw(" - Switch to RIGHT panel"),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("RIGHT PANEL (Selected Items):")
-                .bold()
-                .fg(Color::Cyan),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("↑/↓").bold().fg(Color::Yellow),
-            Span::raw(" - Navigate selected items"),
-        ]),
-        Line::from(vec![
-            Span::raw("Space").bold().fg(Color::Yellow),
-            Span::raw(" - Toggle packed status"),
-        ]),
-        Line::from(vec![
-            Span::raw("Tab").bold().fg(Color::Yellow),
-            Span::raw(" - Switch to LEFT panel"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::raw("ADD/EDIT POPUP:").bold().fg(Color::Yellow)]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("Tab").bold().fg(Color::Yellow),
-            Span::raw(" - Cycle through fields (Name → Category → Quantity)"),
-        ]),
-        Line::from(vec![
-            Span::raw("↑/↓").bold().fg(Color::Yellow),
-            Span::raw(" - Select category from dropdown"),
-        ]),
-        Line::from(vec![
-            Span::raw("Enter").bold().fg(Color::Yellow),
-            Span::raw(" - Save changes"),
-        ]),
-        Line::from(vec![
-            Span::raw("Esc").bold().fg(Color::Red),
-            Span::raw(" - Cancel"),
-        ]),
-        Line::from(""),
-        Line::from(vec![Span::raw("GENERAL:").bold().fg(Color::Yellow)]),
-        Line::from(""),
-        Line::from(vec![
-            Span::raw("?").bold().fg(Color::Yellow),
-            Span::raw(" - Show this help"),
-        ]),
-        Line::from(vec![
-            Span::raw("q").bold().fg(Color::Red),
-            Span::raw(" - Quit application"),
-        ]),
-    ];
-
+    let help_text = help_content();
     let help_para = Paragraph::new(help_text).wrap(Wrap { trim: true });
     f.render_widget(help_para, inner);
 }
@@ -2876,7 +3908,7 @@ fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDr
             }),
             Span::raw(&editor.multiplier),
         ]);
-        let hint = Line::from("Tab switch field | Enter save | Esc cancel".dim());
+        let hint = hint_line(hint_entries(HintSurface::ModifierEditor));
 
         let para = Paragraph::new(vec![name_line, multiplier_line, hint]);
         f.render_widget(para, inner);
@@ -2906,17 +3938,6 @@ fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDr
         } else {
             Style::new().fg(Color::DarkGray)
         }),
-        Span::raw(" | "),
-        Span::raw(if state.config_section == ConfigSection::Activities {
-            "[Activities]"
-        } else {
-            " Activities "
-        })
-        .style(if state.config_section == ConfigSection::Activities {
-            Style::new().fg(Color::Yellow).bold()
-        } else {
-            Style::new().fg(Color::DarkGray)
-        }),
     ]);
     f.render_widget(
         Paragraph::new(tabs),
@@ -2939,7 +3960,6 @@ fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDr
     let modifiers = match state.config_section {
         ConfigSection::TravelStyles => &state.modifiers.travel_styles,
         ConfigSection::Weather => &state.modifiers.weather,
-        ConfigSection::Activities => &state.modifiers.activities,
     };
 
     // Window the list so the cursor stays visible
@@ -2987,23 +4007,8 @@ fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDr
     );
 
     // Instructions
-    let instructions = Paragraph::new(vec![Line::from(vec![
-        Span::raw("Tab").bold().fg(Color::Yellow),
-        Span::raw(" Switch section | "),
-        Span::raw("↑/↓").bold().fg(Color::Yellow),
-        Span::raw(" Move | "),
-        Span::raw("A").bold().fg(Color::Yellow),
-        Span::raw(" Add | "),
-        Span::raw("E").bold().fg(Color::Yellow),
-        Span::raw(" Edit | "),
-        Span::raw("D").bold().fg(Color::Yellow),
-        Span::raw(" Delete | "),
-        Span::raw("Ctrl+E").bold().fg(Color::Yellow),
-        Span::raw(" Raw editor | "),
-        Span::raw("Esc").bold().fg(Color::Red),
-        Span::raw(" Back"),
-    ])])
-    .wrap(Wrap { trim: true });
+    let instructions =
+        Paragraph::new(hint_line(hint_entries(HintSurface::Config))).wrap(Wrap { trim: true });
     f.render_widget(instructions, instructions_area);
 }
 
@@ -3106,23 +4111,24 @@ fn draw_config_editor_screen(
             Span::raw(" ").fg(Color::Red),
             Span::raw(error.clone()).fg(Color::Red).bold(),
         ]),
-        None => Line::from(vec![
-            Span::raw(" Ctrl+S").bold().fg(Color::Yellow),
-            Span::raw(" save & apply | "),
-            Span::raw("Esc").bold().fg(Color::Red),
-            Span::raw(" cancel | "),
-            Span::raw("Ctrl+E").bold().fg(Color::Yellow),
-            Span::raw(" reopen"),
-        ]),
+        None => hint_line(hint_entries(HintSurface::RawEditor)),
     };
     f.render_widget(Paragraph::new(footer), footer_area);
 }
 
 fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut AppDrawState) {
-    let [title_area, list_area] = *Layout::default()
+    // The hint footer's height adapts to the panel width: entries are
+    // packed into as few rows as fit, so every binding stays visible
+    let hint_lines = hint_rows(hint_entries(HintSurface::LeftPanel), area.width as usize);
+    let hints_height = hint_lines.len() as u16;
+    let [title_area, list_area, hints_area] = *Layout::default()
         .direction(Direction::Vertical)
         .margin(0)
-        .constraints([Constraint::Length(1), Constraint::Min(10)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(10),
+            Constraint::Length(hints_height),
+        ])
         .split(area)
     else {
         return;
@@ -3144,10 +4150,12 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
     let mut categories_map: std::collections::BTreeMap<String, Vec<(usize, &Item)>> =
         std::collections::BTreeMap::new();
     for (idx, item) in state.packing_list.items.iter().enumerate() {
-        categories_map
-            .entry(item.category.clone())
-            .or_default()
-            .push((idx, item));
+        for category in &item.categories {
+            categories_map
+                .entry(category.clone())
+                .or_default()
+                .push((idx, item));
+        }
     }
 
     // Cursor position within the panel's rows (only when the left side is focused)
@@ -3272,46 +4280,16 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
         );
     }
 
-    // Instructions at bottom if space available
-    let visible_rows = total_rows.min(viewport_height);
-    if visible_rows + 5 < list_area.height as usize {
-        let instructions_y = (visible_rows) as u16;
-        let instructions_area = Rect {
-            x: list_area.x,
-            y: list_area.y + instructions_y,
-            width: list_area.width,
-            height: list_area.height - instructions_y,
-        };
+    // Navigation hints: fixed footer, always visible
+    let hints = Paragraph::new(hint_lines).wrap(Wrap { trim: true });
+    f.render_widget(hints, hints_area);
+}
 
-        let instructions = Paragraph::new(vec![
-            Line::from(vec![
-                Span::raw("↑/↓").bold().fg(Color::Yellow),
-                Span::raw(" Navigate | "),
-                Span::raw("Space").bold().fg(Color::Yellow),
-                Span::raw(" Select | "),
-                Span::raw("Ctrl+Space").bold().fg(Color::Yellow),
-                Span::raw(" Category | "),
-                Span::raw("A").bold().fg(Color::Yellow),
-                Span::raw(" Add | "),
-                Span::raw("E").bold().fg(Color::Yellow),
-                Span::raw(" Edit | "),
-                Span::raw("D").bold().fg(Color::Yellow),
-                Span::raw(" Delete"),
-            ]),
-            Line::from(vec![
-                Span::raw("←/→").bold().fg(Color::Yellow),
-                Span::raw(" Collapse/Expand | "),
-                Span::raw("C").bold().fg(Color::Yellow),
-                Span::raw(" Toggle | "),
-                Span::raw("Tab").bold().fg(Color::Yellow),
-                Span::raw(" Switch | "),
-                Span::raw("?").bold().fg(Color::Yellow),
-                Span::raw(" Help"),
-            ]),
-        ])
-        .wrap(Wrap { trim: true });
-        f.render_widget(instructions, instructions_area);
-    }
+// Whether every item of a category is packed; an empty category counts
+// as all-packed (vacuous truth). Used for the compiled list's category
+// header indicator.
+fn category_all_packed(packed_states: &[bool]) -> bool {
+    packed_states.iter().all(|&p| p)
 }
 
 fn draw_selected_items_panel(
@@ -3319,12 +4297,17 @@ fn draw_selected_items_panel(
     area: Rect,
     state: &mut AppDrawState,
 ) {
-    let [title_area, list_area, stats_area] = *Layout::default()
+    // The hint footer's height adapts to the panel width: entries are
+    // packed into as few rows as fit, so every binding stays visible
+    let hint_lines = hint_rows(hint_entries(HintSurface::RightPanel), area.width as usize);
+    let hints_height = hint_lines.len() as u16;
+    let [title_area, list_area, hints_area, stats_area] = *Layout::default()
         .direction(Direction::Vertical)
         .margin(0)
         .constraints([
             Constraint::Length(1),
             Constraint::Min(10),
+            Constraint::Length(hints_height),
             Constraint::Length(5),
         ])
         .split(area)
@@ -3365,7 +4348,7 @@ fn draw_selected_items_panel(
         std::collections::BTreeMap::new();
     for (idx, item) in &selected_items {
         categories_map
-            .entry(item.category.clone())
+            .entry(item.primary_category().to_string())
             .or_default()
             .push((*idx, item));
     }
@@ -3411,7 +4394,24 @@ fn draw_selected_items_panel(
 
         match row {
             PanelRow::Category(category) => {
+                // Packing indicator on the compiled list's category header:
+                // all-packed (✓ green) vs. partially packed (○ red)
+                let packed_states: Vec<bool> = state
+                    .packing_list
+                    .items
+                    .iter()
+                    .filter(|item| item.editable && item.in_category(category))
+                    .map(|item| item.packed)
+                    .collect();
+                let all_packed = category_all_packed(&packed_states);
+                let (marker, marker_color) = if all_packed {
+                    ("✓ ", Color::Green)
+                } else {
+                    ("○ ", Color::Red)
+                };
+
                 let category_line = Line::from(vec![
+                    Span::raw(marker).fg(marker_color),
                     Span::raw("▼ "),
                     Span::raw(category).bold().fg(Color::Cyan),
                 ]);
@@ -3519,6 +4519,10 @@ fn draw_selected_items_panel(
     ])
     .block(Block::default().borders(Borders::TOP));
     f.render_widget(stats, stats_area);
+
+    // Navigation hints: fixed footer row, always visible
+    let hints = Paragraph::new(hint_lines).wrap(Wrap { trim: true });
+    f.render_widget(hints, hints_area);
 }
 
 fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, fields: &PopupFields) {
@@ -3625,24 +4629,7 @@ fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, fields: &Pop
         width: content_area.width,
         height: content_area.height - 4,
     };
-    let instructions = Paragraph::new(vec![
-        Line::from(vec![
-            Span::raw("Tab").bold().fg(Color::Yellow),
-            Span::raw(" - Cycle fields"),
-        ]),
-        Line::from(vec![
-            Span::raw("↑/↓").bold().fg(Color::Yellow),
-            Span::raw(" - Select fields.category"),
-        ]),
-        Line::from(vec![
-            Span::raw("Enter").bold().fg(Color::Yellow),
-            Span::raw(" - Save"),
-        ]),
-        Line::from(vec![
-            Span::raw("Esc").bold().fg(Color::Red),
-            Span::raw(" - Cancel"),
-        ]),
-    ]);
+    let instructions = Paragraph::new(hint_line(hint_entries(HintSurface::AddEditPopup)));
     f.render_widget(instructions, instructions_area);
 
     // Draw category dropdown or selected category (last, so the open dropdown overlays the fields below)
@@ -3784,6 +4771,33 @@ fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, fields: &Po
     let quantity_para = Paragraph::new(vec![quantity_line]);
     f.render_widget(quantity_para, quantity_area);
 
+    // Draw mode field (edit dialog only): automatic or fixed quantity
+    if let Some(auto) = fields.auto_quantity {
+        let mode_area = Rect {
+            x: content_area.x,
+            y: content_area.y + 3,
+            width: content_area.width,
+            height: 1,
+        };
+        let mode_line = Line::from(vec![
+            Span::raw("Mode: ").style(if fields.field == InputField::Mode {
+                field_style
+            } else {
+                normal_style
+            }),
+            Span::raw(if auto { "automatic" } else { "fixed" }).style(
+                if fields.field == InputField::Mode {
+                    field_style
+                } else {
+                    normal_style
+                },
+            ),
+            Span::raw("  (Space toggles)").dim(),
+        ]);
+        let mode_para = Paragraph::new(vec![mode_line]);
+        f.render_widget(mode_para, mode_area);
+    }
+
     // Draw instructions
     let instructions_area = Rect {
         x: content_area.x,
@@ -3791,24 +4805,7 @@ fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, fields: &Po
         width: content_area.width,
         height: content_area.height - 4,
     };
-    let instructions = Paragraph::new(vec![
-        Line::from(vec![
-            Span::raw("Tab").bold().fg(Color::Yellow),
-            Span::raw(" - Cycle fields"),
-        ]),
-        Line::from(vec![
-            Span::raw("↑/↓").bold().fg(Color::Yellow),
-            Span::raw(" - Select fields.category"),
-        ]),
-        Line::from(vec![
-            Span::raw("Enter").bold().fg(Color::Yellow),
-            Span::raw(" - Save"),
-        ]),
-        Line::from(vec![
-            Span::raw("Esc").bold().fg(Color::Red),
-            Span::raw(" - Cancel"),
-        ]),
-    ]);
+    let instructions = Paragraph::new(hint_line(hint_entries(HintSurface::AddEditPopup)));
     f.render_widget(instructions, instructions_area);
 
     // Draw category dropdown or selected category (last, so the open dropdown overlays the fields below)
@@ -3905,14 +4902,7 @@ fn draw_confirm_delete_popup(
             Span::raw("?"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::raw("Enter").bold().fg(Color::Yellow),
-            Span::raw(" - Confirm"),
-        ]),
-        Line::from(vec![
-            Span::raw("Esc").bold().fg(Color::Red),
-            Span::raw(" - Cancel"),
-        ]),
+        hint_line(hint_entries(HintSurface::DeletePopup)),
     ];
 
     let content = Paragraph::new(lines);

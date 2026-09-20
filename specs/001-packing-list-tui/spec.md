@@ -23,6 +23,13 @@
 > human-readable configuration file rather than a dedicated import/export
 > command; see User Story 3.
 
+> **Update (2026-09-20, spec 015)**: Input point 3 ("Items can be in
+> multiple categories") is now implemented: an item carries a list of
+> categories, appears under each in the tree, and shares one selection
+> and packed state across all occurrences. The configuration file
+> stores `categories:` per item; a legacy single `category:` value is
+> lifted into a one-element list on load.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Generate and Customize Packing List (Priority: P1)

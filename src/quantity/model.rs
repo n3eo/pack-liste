@@ -23,8 +23,6 @@ pub struct QuantityCalculationInput {
     pub travel_style_multiplier: f32,
     pub weather: String,
     pub weather_multiplier: f32,
-    pub activities: Vec<String>,
-    pub activity_multipliers: Vec<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

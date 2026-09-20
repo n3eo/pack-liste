@@ -101,6 +101,12 @@ The user inputs activities for their trip (e.g., "hiking", "beach", "city tour")
   **Answer**: Unknown names fall back to a neutral multiplier of 1.0 so the calculation never fails.
   **Acceptance Criteria**: An unknown style, weather, or activity never blocks the calculation.
 
+  > **Update (2026-09-20, spec 015)**: FR-010 is now uniformly enforced:
+  > unknown activities resolve to 1.0 in the activity average (previously
+  > they were silently dropped, which could hand control back to the
+  > weather multiplier). All three modifier kinds now share the exact
+  > fallback behavior this requirement specifies.
+
 - **EC-005**: What happens to fixed-quantity items when trip parameters change?
   **Answer**: Fixed-quantity items keep their quantity regardless of trip parameters; only automatic items are recalculated.
   **Acceptance Criteria**: A fixed item's quantity is identical before and after any parameter change.
@@ -147,3 +153,11 @@ The user inputs activities for their trip (e.g., "hiking", "beach", "city tour")
 - The quantity calculation algorithm is deterministic and produces consistent results for the same inputs.
 - When activities are selected, their average multiplier replaces the weather multiplier.
 - Modifier names and multipliers are user-configurable (see spec 002); unknown names fall back to 1.0.
+
+> **Alignment note (2026-09-20, spec 017)**: The activity dimension is
+> removed by spec 017 (remove-activities). The calculation is the
+> pre-activity rule: base (weekdays, capped at 20) × travel-style
+> multiplier × weather multiplier, rounded, minimum 1. The
+> activity-priority rule ("activities replace weather") and the
+> unknown-activity fallback are gone with the dimension; unknown
+> travel-style and weather names still fall back to 1.0.

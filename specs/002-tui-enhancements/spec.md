@@ -138,3 +138,9 @@ The system uses colors in the TUI to provide visual feedback: selected versus de
 - Travel styles, weather options, and activities are user-configurable named modifiers with multipliers; built-in defaults are provided out of the box.
 - When activities are selected, their average multiplier replaces the weather multiplier in the quantity calculation.
 - Colors used in the TUI are accessible and distinguishable for users with color vision deficiencies.
+
+> **Alignment note (2026-09-20, spec 017)**: The activity dimension is
+> removed by spec 017 (remove-activities). Travel styles and weather
+> remain the two configurable modifier kinds; the activities section of
+> the configuration screen and the activity-priority calculation rule
+> no longer exist. The weather multiplier applies directly.

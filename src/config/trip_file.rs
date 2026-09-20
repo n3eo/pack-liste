@@ -15,8 +15,6 @@ pub struct TripFile {
     pub weekdays: u32,
     pub travel_style: String,
     pub weather: String,
-    #[serde(default)]
-    pub selected_activities: Vec<String>,
     /// The compiled packing list: selected items with packed state.
     /// Quantities are not persisted; they are recalculated on load.
     #[serde(default)]
@@ -65,27 +63,41 @@ impl TripFile {
     /// no longer exist in the input config are dropped; items are matched to
     /// the current category from the config. The packed state is preserved
     /// for items that still exist.
-    pub fn reconcile(&mut self, config_items: &[(String, String)]) {
-        let find_config_category = |name: &str, category: &str| -> Option<String> {
+    /// Reconcile the trip's selected items against the current item catalog.
+    ///
+    /// Items are matched by name (case-insensitive) against any of a
+    /// catalog item's categories. Items that no longer exist in the
+    /// catalog are dropped; surviving items are matched to the catalog
+    /// item's primary category. The packed state is preserved for items
+    /// that still exist.
+    pub fn reconcile(&mut self, config_items: &[(String, Vec<String>)]) {
+        let find_config_categories = |name: &str, category: &str| -> Option<Vec<String>> {
             // Prefer an exact match on both name and category, fall back
             // to a name-only match
             config_items
                 .iter()
-                .find(|(n, c)| n.eq_ignore_ascii_case(name) && c.eq_ignore_ascii_case(category))
+                .find(|(n, cs)| {
+                    n.eq_ignore_ascii_case(name)
+                        && cs.iter().any(|c| c.eq_ignore_ascii_case(category))
+                })
                 .or_else(|| {
                     config_items
                         .iter()
                         .find(|(n, _)| n.eq_ignore_ascii_case(name))
                 })
-                .map(|(_, c)| c.clone())
+                .map(|(_, cs)| cs.clone())
         };
 
         self.items
-            .retain(|item| find_config_category(&item.name, &item.category).is_some());
+            .retain(|item| find_config_categories(&item.name, &item.category).is_some());
 
         for item in &mut self.items {
-            if let Some(category) = find_config_category(&item.name, &item.category) {
-                item.category = category;
+            if let Some(categories) = find_config_categories(&item.name, &item.category) {
+                // The trip file stores the primary category for display
+                item.category = categories
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| item.category.clone());
             }
         }
     }

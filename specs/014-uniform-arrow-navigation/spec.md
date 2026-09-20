@@ -6,6 +6,14 @@
 
 **Status**: Draft
 
+> **Alignment note (2026-09-20, spec 016)**: This spec's model (Up/Down
+> navigate, Left/Right adjust) is implemented by spec 016
+> (harmonized-ui-navigation): the main screen's Left/Right collapse
+> binding is removed (US-1/FR-001 of 016), the add/edit dialog's category
+> field cycles with Left/Right, and the hints/help state the final
+> binding set. The model definition here is satisfied; the remaining
+> difference is scope bookkeeping only.
+
 **Input**: User description:
 "Navigation shall always use up and down
 for category change or number increase/decrease use left and right"

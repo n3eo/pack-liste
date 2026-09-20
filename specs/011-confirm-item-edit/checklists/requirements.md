@@ -41,3 +41,6 @@
   unconditional confirmation (EC-004/EC-005), prompt shows resulting values
   rather than a full old/new diff, Esc cancels like the delete prompt,
   quit-at-prompt discards the edit.
+- Re-invoked 2026-09-20 ("in the edit field ask for confirmation before
+  saving"): the phrasing matches the existing spec exactly; recorded in
+  the spec's Input section. The checklist remains fully passing.

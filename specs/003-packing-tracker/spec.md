@@ -19,6 +19,14 @@
 > recalculated on every trip-parameter change. Visual feedback uses colored
 > state symbols and a progress summary rather than full-row background colors,
 > and category headers do not carry a packed/unpacked state.
+>
+> **Update (2026-09-20, spec 015)**: Two gaps this spec recorded are now
+> closed. FR-002's fixed-quantity mode is now editable in the TUI (the
+> edit dialog's Mode field; previously config-file only), and the
+> original input point 4 (category marked when not all items packed) is
+> restored as the compiled list's category-header packing indicator.
+> Category headers now carry an all-packed/partially-packed marker;
+> the "do not carry a packed state" sentence above is superseded.
 
 ## User Scenarios & Testing *(mandatory)*
 

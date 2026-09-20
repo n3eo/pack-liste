@@ -43,7 +43,20 @@
   requirements (FR-010), and success criteria (SC-006) were updated to
   match. The user's examples are used verbatim as acceptance scenarios
   (US-1 scenarios 1–3).
+- Refined again 2026-09-20 ("fixed offset like +2 ... or another
+  modifier like 1.25, only support either or"): the reserve gained its
+  proportional alternative, the buffer multiplier, with explicit
+  per-item mutual exclusivity. Updated: the Input section (second
+  refinement recorded verbatim), US-1 (scenarios 5–6, the buffer
+  concept), US-2 (scenario 4, the editor's exclusivity), EC-006
+  (reworded for both buffer kinds), new EC-008/EC-009/EC-010
+  (multiplier range 1.0–3.0, exclusivity, rounding interaction),
+  FR-001/003/006/011, the Key Entities (Buffer Multiplier; the
+  calculation rule), SC-001/006/007, and the Assumptions. The
+  activity references were also corrected to the post-017 rule
+  (weather is the sole condition multiplier).
 - All checklist items pass; no [NEEDS CLARIFICATION] markers were needed.
   Reasonable defaults were chosen and documented in Assumptions (rate
-  range 0.05–10.0, reserve range 0–10, defaults rate 1.0 / reserve 0,
-  quantity cap 99, editing via the existing item dialog).
+  range 0.05–10.0, reserve range 0–10, multiplier range 1.0–3.0,
+  defaults rate 1.0 / no buffer, quantity cap 99, editing via the
+  existing item dialog).

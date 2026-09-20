@@ -2,9 +2,12 @@
 
 ## Overview
 
-Pack-Liste is a terminal-based packing list application with dynamic quantity calculation. The application has two screens:
-1. **Welcome Screen**: Configure trip parameters
-2. **Main Screen**: View and manage packing list with categories
+Pack-Liste is a terminal-based packing list application with dynamic quantity calculation. The application has these screens:
+1. **Welcome Screen**: Configure trip parameters and the packing list file
+2. **Main Screen**: View and manage the packing list (all items left, compiled list right)
+3. **Help Screen** (`?`): Full navigation reference
+4. **Configuration Screen** (`O`): Manage travel style and weather modifiers
+5. **Raw Config Editor** (`Ctrl+E`): Edit the config file in-app
 
 ## Running the Application
 
@@ -26,154 +29,144 @@ If you're in a non-interactive environment but want to test the TUI:
 cargo run -- --force-tui
 ```
 
+The packing list file can be passed as the first argument:
+
+```bash
+cargo run -- my-trip.yaml
+```
+
+## Global Keys (any screen)
+
+| Key | Action |
+|-----|--------|
+| Ctrl+C | Quit immediately (saves config and trip file) |
+| Ctrl+E | Open the raw config file editor |
+| q | Quit (saves config and trip file) |
+| ? | Help screen (from Main and Welcome) |
+| O | Configuration screen (from any screen except Config/ConfigEditor) |
+
 ## Screen 1: Welcome Screen
 
-The welcome screen allows you to configure your trip parameters before viewing the packing list.
+The welcome screen allows you to configure your trip parameters and the packing list file before viewing the packing list.
 
-### Features
-- **Trip Duration**: Set number of weekdays (1-30)
-- **Travel Style**: Choose from Minimalist, Standard, Luxury, Backpacker
-- **Weather**: Choose from Hot, Cold, Rainy, Snowy, Mixed
-- **Activities**: Toggle activities on/off
+### Fields
+
+- **Packing List File** (required): the path where the compiled packing list is persisted; the first field and required to continue
+- **Trip Duration**: number of weekdays (1-30)
+- **Travel Style**: e.g. Minimalist, Standard, Luxury, Backpacker
+- **Weather**: e.g. Hot, Cold, Rainy, Snowy, Mixed
 
 ### Navigation
-- **Tab**: Move focus to next field
-- **Shift+Tab**: Move focus to previous field
-- **Focused field** is highlighted with a yellow border
 
-### Value Adjustment
-- **Weekdays**: Use **+** or **-** to increase/decrease
-- **Travel Style/Weather/Activities**: Use **↑** or **↓** to cycle through options
-
-### Continue
-- **Enter**: Continue to main packing list screen
-- **q**: Quit application
+| Key | Action |
+|-----|--------|
+| ↑/↓ | Move focus between fields |
+| ←/→ | Adjust the focused value (weekdays ±1, cycle style/weather) |
+| +/- | Adjust weekdays |
+| Enter | Edit file name (on file field) / continue to main screen |
+| F | Edit the trip file path |
+| Esc | Quit |
 
 ## Screen 2: Main Screen
 
-The main screen shows categories and items on the left, and the compiled packing list on the right.
+The main screen shows all items grouped by category on the left, and the compiled packing list on the right. Both panels show a navigation hint line at the bottom at every supported terminal size.
 
-### Left Panel: Categories & Items
+### Left Panel: All Items
+
 - Shows all categories with their items
 - Categories can be **collapsed** (▶) or **expanded** (▼)
-- Items show their packed status: **✓** (packed) or **○** (not packed)
-- All items are **preselected** by default
-- Shows item name and calculated quantity
+- Each item shows its selection state (✓ selected / ○ not selected), name, and quantity
+- All items are **preselected** by default on a new list
 
 ### Right Panel: Compiled Packing List
-- Shows the same items grouped by category
-- Categories can be collapsed/expanded independently
-- Shows statistics at the bottom
 
-### Features
-
-1. **Collapsible Categories**
-   - **▼**: Category is expanded (items visible)
-   - **▶**: Category is collapsed (items hidden)
-   - Press **C** to toggle collapse/expand
-
-2. **Item Status**
-   - **✓**: Item is marked as packed
-   - **○**: Item is not packed
-   - Press **Space** to toggle packed status
-
-3. **Item Selection**
-   - All items are preselected by default
-   - Press **X** to exclude/include entire category
-   - Press **Enter** to toggle individual item selection
-
-4. **Add/Remove Items**
-   - Press **A** to add a new item to the current category
-   - Press **D** to remove the selected item
-
-5. **Live Quantities**
-   - Item quantities are calculated based on trip parameters
-   - Quantities update automatically
+- Shows the selected items grouped by category
+- Category headers show a packing indicator: ✓ (all packed) / ○ (partially packed)
+- Each item shows its packed state (✓ packed / ○ unpacked)
+- Shows statistics at the bottom (total, packed, unpacked, progress)
 
 ### Navigation
-- **Tab**: Switch between left and right panels
-- **↑/↓**: Navigate up and down through categories and items
-- **Current selection** is highlighted with yellow
 
-### Actions
 | Key | Action |
 |-----|--------|
-| Tab | Switch between left and right panels |
-| ↑/↓ | Navigate through categories/items |
-| C | Collapse/expand current category |
-| Space | Toggle packed status of selected item |
-| Enter | Toggle selection of selected item |
-| A | Add new item to current category |
-| D | Remove selected item |
-| X | Toggle all items in category as selected/excluded |
-| q | Quit application |
+| ↑/↓ | Move the cursor through the focused panel's rows |
+| ←/→ | Nothing (no value to adjust on the main screen) |
+| Tab / Shift+Tab | Switch focus between panels |
+| Space | Toggle selection (left) / toggle packed (right) |
+| Ctrl+Space | Toggle the category's selection (left panel) |
+| C | Toggle collapse/expand of the category under the cursor |
+| A | Add a new item |
+| E | Edit the item under the cursor |
+| D | Delete the item under the cursor (with confirmation) |
+| R | Recalculate quantities on the current list |
+| ? | Help screen |
+| Esc | Quit |
 
-### Statistics
+## Add/Edit Item Dialog
 
-The right panel shows:
-- **Total Items**: Total number of items in the packing list
-- **Packed**: Number of items marked as packed
-- **Unpacked**: Number of items not yet packed
-- **Progress**: Percentage of items packed
+| Key | Action |
+|-----|--------|
+| Tab | Cycle fields: Name → Category → Quantity → Mode → Name |
+| ↑/↓ | Move the category dropdown highlight (category field) |
+| ←/→ | Cycle the category selection (category field) |
+| Space | Toggle the quantity mode (Mode field) / toggle category membership (category field) |
+| Enter | Save |
+| Esc | Cancel |
+
+## Configuration Screen (O)
+
+Manage travel style and weather modifiers.
+
+| Key | Action |
+|-----|--------|
+| Tab / Shift+Tab | Switch section (travel styles / weather) |
+| ↑/↓ | Move the modifier cursor |
+| A | Add a modifier |
+| E | Edit the modifier under the cursor |
+| D | Delete the modifier under the cursor |
+| Esc | Close the modifier editor if open; otherwise leave the config screen |
+
+## Raw Config Editor (Ctrl+E)
+
+Edit the config file in-app.
+
+| Key | Action |
+|-----|--------|
+| ↑/↓/←/→ | Move the text cursor |
+| Home/End | Cursor to line start / end |
+| Enter | Insert a new line |
+| Backspace | Delete backward |
+| Ctrl+S | Save and apply (validates YAML first) |
+| Esc | Discard edits and return |
 
 ## Example Workflow
 
 ### Setting Up Your Trip
 
 1. Start the application: `cargo run`
-2. You'll see the Welcome Screen
-3. Use **Tab** to navigate to Weekdays field
-4. Use **+** to set weekdays to 10
-5. Use **Tab** to navigate to Travel Style
-6. Use **↓** to set to Luxury
-7. Use **Tab** to navigate to Weather
-8. Use **↓** to set to Cold
-9. Use **Tab** to navigate to Activities
-10. Use **↓** to add Hiking activity
-11. Press **Enter** to continue to main screen
+2. Set the packing list file path (Enter on the file field opens its editor)
+3. Use **↑/↓** to move focus to the Weekdays field
+4. Use **←/→** or **+/-** to set weekdays to 10
+5. Use **↑/↓** to move focus to Travel Style, **←/→** to cycle to Luxury
+6. Use **↑/↓** to move focus to Weather, **←/→** to cycle to Cold
+7. Press **Enter** to continue to the main screen
 
 ### Managing Your Packing List
 
-1. You'll see the Main Screen with categories on left and compiled list on right
-2. Use **↑/↓** to navigate through categories
-3. Press **C** to collapse a category
-4. Press **C** again to expand it
-5. Use **↑/↓** to navigate to an item
-6. Press **Space** to mark the item as packed (✓)
-7. Press **Space** again to mark it as unpacked (○)
-8. Press **A** to add a new item to the current category
-9. Press **D** to remove the selected item
-10. Press **X** to exclude all items in a category
-11. Press **Tab** to switch to the right panel
-12. Press **q** to quit when done
-
-## Key Bindings Summary
-
-### Welcome Screen
-| Key | Action |
-|-----|--------|
-| Tab / Shift+Tab | Navigate between fields |
-| + / - | Adjust weekdays |
-| ↑ / ↓ | Cycle through options |
-| Enter | Continue to main screen |
-| q | Quit |
-
-### Main Screen
-| Key | Action |
-|-----|--------|
-| Tab | Switch between panels |
-| ↑ / ↓ | Navigate |
-| C | Collapse/expand category |
-| Space | Toggle packed status |
-| Enter | Toggle item selection |
-| A | Add item |
-| D | Remove item |
-| X | Toggle category selection |
-| q | Quit |
+1. Use **↑/↓** to navigate through categories and items
+2. Press **C** to collapse a category; **C** again to expand it
+3. Press **Space** on the left panel to toggle an item's selection
+4. Press **Tab** to switch to the right panel
+5. Press **Space** on the right panel to mark an item as packed (✓)
+6. Press **A** to add a new item (the current category is preselected)
+7. Press **E** to edit the item under the cursor
+8. Press **D** to delete the item under the cursor (confirmation required)
+9. Press **R** to bring the amounts up to date (recalculates every automatic item; fixed items are untouched)
+10. Press **q** to quit when done (config and trip file are saved)
 
 ## Configuration
 
-Packing lists are stored in `~/.config/pack-liste/` directory as JSON files.
+The application configuration (items, categories, trip parameters, modifiers) is stored in `~/.config/pack-liste/config.yaml` as YAML. The compiled packing list is persisted to the packing list file path set on the welcome screen (or passed as the first argument), in a human-readable YAML format that can also be edited by hand.
 
 ## Troubleshooting
 
@@ -214,51 +207,3 @@ The application should work in:
 - Memory usage: <100MB
 - No unsafe Rust code
 
-## Implementation Notes
-
-### Features Implemented
-
-✅ **Welcome Screen**
-- Trip parameter configuration
-- No packing list shown on right
-- Clean layout with instructions
-
-✅ **Main Screen**
-- Split screen layout (categories left, compiled list right)
-- All items preselected
-- Categories and items displayed
-
-✅ **Collapsible Categories**
-- Each category can be collapsed/expanded
-- ▼ symbol for expanded
-- ▶ symbol for collapsed
-- Press C to toggle
-
-✅ **Navigation**
-- Tab to switch between panels
-- ↑/↓ to navigate through categories/items
-- Current selection highlighted
-
-✅ **Mark as Packed**
-- Space to toggle individual item packed status
-- ✓ for packed, ○ for unpacked
-- Progress percentage calculated
-
-✅ **Add/Remove Items**
-- A to add new item to current category
-- D to remove selected item
-- Items are added with default quantity of 1
-
-✅ **Category Selection**
-- X to toggle all items in category as selected/excluded
-- Excluded items are hidden from the display
-
-### Features Not Yet Implemented
-
-- Individual item quantity editing
-- Save/load packing list configurations
-- Multiple packing list management
-- Export packing list to file
-- Import packing list from file
-- Search/filter items
-- Custom item creation with name/quantity

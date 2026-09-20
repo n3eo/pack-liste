@@ -206,3 +206,9 @@ An item can belong to more than one category, restoring spec 001's input point 3
 - The help screen is extended in place; its layout must still fit the minimum supported terminal size (spec 006's constraints apply when both are implemented).
 - Multi-category items keep one underlying identity: selection, packed state, quantity, and edit dialog operate on the item, not per occurrence.
 - Input-level tests target the handler layer (state in, key event, state out); full-loop pty tests remain the exception, not the rule.
+
+> **Alignment note (2026-09-20, spec 017)**: US3 of this spec (the
+> unknown-activity neutral-multiplier fallback) is moot — spec 017
+> (remove-activities) removed the activity dimension entirely, so
+> there are no activity names to resolve. The fallback behavior
+> survives only for travel styles and weather (unknown names → 1.0).

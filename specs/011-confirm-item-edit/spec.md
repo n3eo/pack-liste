@@ -9,6 +9,14 @@
 **Input**: User description:
 "Ask for confirmation before saving an edited item to the config.yaml"
 
+> **Re-invoked 2026-09-20** with: "in the edit field ask for
+> confirmation before saving" — the same request, phrased against the
+> edit dialog's save action. The existing spec already covers it
+> exactly (US1: a confirmation prompt between the edit dialog and the
+> write; declining discards the edit with nothing written). No spec
+> change was needed; this phrasing is recorded as interpretation
+> evidence.
+
 > **Scope note**: Editing an item through the TUI (name, category,
 > quantity) currently writes the change to the configuration file
 > immediately when the edit dialog is confirmed — there is no second
