@@ -1,0 +1,570 @@
+warning: unnecessary parentheses around block return value
+    --> src/ui/app.rs:3165:65
+     |
+3165 | ...   Span::raw(format!("{:.0}%", if total_selected > 0 { (packed as f32 / total_selected as f32 * 100.0) } else { 0.0 })).bold(),
+     |                                                           ^                                             ^
+     |
+     = note: `#[warn(unused_parens)]` (part of `#[warn(unused)]`) on by default
+help: remove these parentheses
+     |
+3165 -             Span::raw(format!("{:.0}%", if total_selected > 0 { (packed as f32 / total_selected as f32 * 100.0) } else { 0.0 })).bold(),
+3165 +             Span::raw(format!("{:.0}%", if total_selected > 0 { packed as f32 / total_selected as f32 * 100.0 } else { 0.0 })).bold(),
+     |
+
+warning: variable does not need to be mutable
+   --> src/ui/app.rs:484:13
+    |
+484 |         let mut trip_file_path = cli_trip.as_deref().map(resolve_trip_path).unwrap_or_default();
+    |             ----^^^^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: enum `ConfigError` is never used
+ --> src/config/error.rs:4:10
+  |
+4 | pub enum ConfigError {
+  |          ^^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `PackingListConfig` is never constructed
+ --> src/config/model.rs:5:12
+  |
+5 | pub struct PackingListConfig {
+  |            ^^^^^^^^^^^^^^^^^
+
+warning: methods `toggle_packed` and `set_quantity` are never used
+  --> src/models/item.rs:36:12
+   |
+17 | impl Item {
+   | --------- methods in this implementation
+...
+36 |     pub fn toggle_packed(&mut self) {
+   |            ^^^^^^^^^^^^^
+...
+40 |     pub fn set_quantity(&mut self, quantity: u32) -> Result<(), String> {
+   |            ^^^^^^^^^^^^
+
+warning: methods `remove_item`, `get_item_mut`, `total_items`, `packed_items`, and `unpacked_items` are never used
+  --> src/models/packing_list.rs:28:12
+   |
+14 | impl PackingList {
+   | ---------------- methods in this implementation
+...
+28 |     pub fn remove_item(&mut self, item_id: &str) -> Option<Item> {
+   |            ^^^^^^^^^^^
+...
+33 |     pub fn get_item_mut(&mut self, item_id: &str) -> Option<&mut Item> {
+   |            ^^^^^^^^^^^^
+...
+37 |     pub fn total_items(&self) -> usize {
+   |            ^^^^^^^^^^^
+...
+41 |     pub fn packed_items(&self) -> usize {
+   |            ^^^^^^^^^^^^
+...
+45 |     pub fn unpacked_items(&self) -> usize {
+   |            ^^^^^^^^^^^^^^
+
+warning: enum `QuantityError` is never used
+ --> src/quantity/error.rs:4:10
+  |
+4 | pub enum QuantityError {
+  |          ^^^^^^^^^^^^^
+
+warning: struct `ItemService` is never constructed
+ --> src/services/item_service.rs:5:12
+  |
+5 | pub struct ItemService;
+  |            ^^^^^^^^^^^
+
+warning: associated items `new`, `update_quantity`, and `toggle_packed` are never used
+  --> src/services/item_service.rs:8:12
+   |
+ 7 | impl ItemService {
+   | ---------------- associated items in this implementation
+ 8 |     pub fn new() -> Self {
+   |            ^^^
+...
+12 |     pub fn update_quantity(&self, item: &mut Item, new_quantity: u32) -> Result<()> {
+   |            ^^^^^^^^^^^^^^^
+...
+20 |     pub fn toggle_packed(&self, item: &mut Item) -> Result<()> {
+   |            ^^^^^^^^^^^^^
+
+warning: struct `PackingService` is never constructed
+ --> src/services/packing_service.rs:8:12
+  |
+8 | pub struct PackingService {
+  |            ^^^^^^^^^^^^^^
+
+warning: associated items `new`, `create_packing_list`, `rename_packing_list`, `export_packing_list`, and `import_packing_list` are never used
+  --> src/services/packing_service.rs:13:12
+   |
+12 | impl PackingService {
+   | ------------------- associated items in this implementation
+13 |     pub fn new(storage_path: PathBuf) -> Result<Self> {
+   |            ^^^
+...
+19 |     pub fn create_packing_list(&self, name: String) -> Result<PackingList> {
+   |            ^^^^^^^^^^^^^^^^^^^
+...
+26 |     pub fn rename_packing_list(&mut self, list: &mut PackingList, new_name: String) -> Result<()> {
+   |            ^^^^^^^^^^^^^^^^^^^
+...
+34 |     pub fn export_packing_list(&self, list: &PackingList) -> Result<PathBuf> {
+   |            ^^^^^^^^^^^^^^^^^^^
+...
+49 |     pub fn import_packing_list(&self, file_path: &PathBuf) -> Result<PackingList> {
+   |            ^^^^^^^^^^^^^^^^^^^
+
+warning: enum `UiError` is never used
+ --> src/ui/error.rs:4:10
+  |
+4 | pub enum UiError {
+  |          ^^^^^^^
+
+warning: this `if` statement can be collapsed
+  --> src/config/trip_file.rs:50:9
+   |
+50 | /         if let Some(parent) = path.parent() {
+51 | |             if !parent.as_os_str().is_empty() {
+52 | |                 fs::create_dir_all(parent)
+53 | |                     .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+54 | |             }
+55 | |         }
+   | |_________^
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+   = note: `#[warn(clippy::collapsible_if)]` on by default
+help: collapse nested if block
+   |
+50 ~         if let Some(parent) = path.parent()
+51 ~             && !parent.as_os_str().is_empty() {
+52 |                 fs::create_dir_all(parent)
+53 |                     .with_context(|| format!("Failed to create directory {}", parent.display()))?;
+54 ~             }
+   |
+
+warning: you seem to want to iterate on a map's values
+   --> src/ui/app.rs:429:29
+    |
+429 |         for (_, indices) in &categories_map {
+    |                             ^^^^^^^^^^^^^^^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#for_kv_map
+    = note: `#[warn(clippy::for_kv_map)]` on by default
+help: use the corresponding method
+    |
+429 -         for (_, indices) in &categories_map {
+429 +         for indices in categories_map.values() {
+    |
+
+warning: this loop could be written as a `while let` loop
+   --> src/ui/app.rs:799:9
+    |
+799 | /         loop {
+800 | |             match self.state {
+801 | |                 AppState::Running => {
+802 | |                     self.draw()?;
+...   |
+811 | |         }
+    | |_________^ help: try: `while let AppState::Running = self.state { .. }`
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#while_let_loop
+    = note: `#[warn(clippy::while_let_loop)]` on by default
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:866:9
+     |
+ 866 | /         if event::poll(std::time::Duration::from_millis(100))? {
+ 867 | |             if let Event::Key(key) = event::read()? {
+ 868 | |                 if key.kind == KeyEventKind::Press {
+...    |
+1297 | |         }
+     | |_________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+ 866 ~         if event::poll(std::time::Duration::from_millis(100))?
+ 867 ~             && let Event::Key(key) = event::read()? {
+ 868 |                 if key.kind == KeyEventKind::Press {
+ ...
+1295 |                 }
+1296 ~             }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:867:13
+     |
+ 867 | /             if let Event::Key(key) = event::read()? {
+ 868 | |                 if key.kind == KeyEventKind::Press {
+ 869 | |                     // Terminate on Ctrl+C from any screen or input mode
+ 870 | |                     if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+...    |
+1296 | |             }
+     | |_____________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+ 867 ~             if let Event::Key(key) = event::read()?
+ 868 ~                 && key.kind == KeyEventKind::Press {
+ 869 |                     // Terminate on Ctrl+C from any screen or input mode
+ ...
+1294 |                     }
+1295 ~                 }
+     |
+
+warning: this `if` statement can be collapsed
+   --> src/ui/app.rs:906:25
+    |
+906 | /                         if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
+907 | |                             if self.draw_state.focus_side == FocusSide::Left {
+908 | |                                 self.toggle_category_selection();
+909 | |                             }
+910 | |                         }
+    | |_________________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+906 ~                         if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal)
+907 ~                             && self.draw_state.focus_side == FocusSide::Left {
+908 |                                 self.toggle_category_selection();
+909 ~                             }
+    |
+
+warning: this `if` statement can be collapsed
+   --> src/ui/app.rs:937:33
+    |
+937 | / ...                   if target >= Weekdays::MIN as i32 && target <= Weekdays::MAX as i32 {
+938 | | ...                       if let Ok(new_weekdays) = Weekdays::new(target as u32) {
+939 | | ...                           self.draw_state.weekdays = new_weekdays;
+940 | | ...                           self.update_quantities()?;
+941 | | ...                       }
+942 | | ...                   }
+    | |_______________________^
+    |
+    = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+    |
+937 ~                                 if target >= Weekdays::MIN as i32 && target <= Weekdays::MAX as i32
+938 ~                                     && let Ok(new_weekdays) = Weekdays::new(target as u32) {
+939 |                                         self.draw_state.weekdays = new_weekdays;
+940 |                                         self.update_quantities()?;
+941 ~                                     }
+    |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:1181:29
+     |
+1181 | / ...                   if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
+1182 | | ...                       if self.draw_state.focus_side == FocusSide::Left {
+1183 | | ...                           self.toggle_category_collapse();
+1184 | | ...                       }
+1185 | | ...                   }
+     | |_______________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1181 ~                             if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal)
+1182 ~                                 && self.draw_state.focus_side == FocusSide::Left {
+1183 |                                     self.toggle_category_collapse();
+1184 ~                                 }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:1203:33
+     |
+1203 | / ...                   if let InputMode::EditingItem { field, .. } = &mut self.draw_state.input_mode {
+1204 | | ...                       if *field == InputField::Category {
+...    |
+1208 | | ...                   }
+     | |_______________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1203 ~                                 if let InputMode::EditingItem { field, .. } = &mut self.draw_state.input_mode
+1204 ~                                     && *field == InputField::Category {
+1205 |                                         // Space toggles category selection in edit mode
+1206 |                                         // This is handled by the field cycling
+1207 ~                                     }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:1212:29
+     |
+1212 | / ...                   if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
+1213 | | ...                       if self.draw_state.focus_side == FocusSide::Left {
+1214 | | ...                           // Start adding new item with the current category preselected
+1215 | | ...                           let categories = self.get_all_categories();
+...    |
+1228 | | ...                   }
+     | |_______________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1212 ~                             if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal)
+1213 ~                                 && self.draw_state.focus_side == FocusSide::Left {
+1214 |                                     // Start adding new item with the current category preselected
+ ...
+1226 |                                     };
+1227 ~                                 }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:1231:29
+     |
+1231 | / ...                   if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
+1232 | | ...                       if self.draw_state.focus_side == FocusSide::Left {
+1233 | | ...                           // Start editing selected item
+1234 | | ...                           self.start_editing_item();
+1235 | | ...                       }
+1236 | | ...                   }
+     | |_______________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1231 ~                             if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal)
+1232 ~                                 && self.draw_state.focus_side == FocusSide::Left {
+1233 |                                     // Start editing selected item
+1234 |                                     self.start_editing_item();
+1235 ~                                 }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:1239:29
+     |
+1239 | / ...                   if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
+1240 | | ...                       if self.draw_state.focus_side == FocusSide::Left {
+1241 | | ...                           // Ask for confirmation before deleting
+1242 | | ...                           if let Some(item_index) = self.current_item_index() {
+...    |
+1248 | | ...                   }
+     | |_______________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1239 ~                             if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal)
+1240 ~                                 && self.draw_state.focus_side == FocusSide::Left {
+1241 |                                     // Ask for confirmation before deleting
+ ...
+1246 |                                     }
+1247 ~                                 }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:1271:29
+     |
+1271 | / ...                   if self.draw_state.screen == Screen::Welcome && self.draw_state.focus == Focus::Weekdays {
+1272 | | ...                       if let Ok(new_weekdays) = Weekdays::new(self.draw_state.weekdays.get() + 1) {
+1273 | | ...                           self.draw_state.weekdays = new_weekdays;
+1274 | | ...                           self.update_quantities()?;
+1275 | | ...                       }
+1276 | | ...                   }
+     | |_______________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1271 ~                             if self.draw_state.screen == Screen::Welcome && self.draw_state.focus == Focus::Weekdays
+1272 ~                                 && let Ok(new_weekdays) = Weekdays::new(self.draw_state.weekdays.get() + 1) {
+1273 |                                     self.draw_state.weekdays = new_weekdays;
+1274 |                                     self.update_quantities()?;
+1275 ~                                 }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:1279:29
+     |
+1279 | / ...                   if self.draw_state.screen == Screen::Welcome && self.draw_state.focus == Focus::Weekdays {
+1280 | | ...                       if self.draw_state.weekdays.get() > Weekdays::MIN {
+1281 | | ...                           if let Ok(new_weekdays) = Weekdays::new(self.draw_state.weekdays.get() - 1) {
+1282 | | ...                               self.draw_state.weekdays = new_weekdays;
+...    |
+1286 | | ...                   }
+     | |_______________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1279 ~                             if self.draw_state.screen == Screen::Welcome && self.draw_state.focus == Focus::Weekdays
+1280 ~                                 && self.draw_state.weekdays.get() > Weekdays::MIN {
+1281 |                                     if let Ok(new_weekdays) = Weekdays::new(self.draw_state.weekdays.get() - 1) {
+ ...
+1284 |                                     }
+1285 ~                                 }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:1280:33
+     |
+1280 | / ...                   if self.draw_state.weekdays.get() > Weekdays::MIN {
+1281 | | ...                       if let Ok(new_weekdays) = Weekdays::new(self.draw_state.weekdays.get() - 1) {
+1282 | | ...                           self.draw_state.weekdays = new_weekdays;
+1283 | | ...                           self.update_quantities()?;
+1284 | | ...                       }
+1285 | | ...                   }
+     | |_______________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1280 ~                                 if self.draw_state.weekdays.get() > Weekdays::MIN
+1281 ~                                     && let Ok(new_weekdays) = Weekdays::new(self.draw_state.weekdays.get() - 1) {
+1282 |                                         self.draw_state.weekdays = new_weekdays;
+1283 |                                         self.update_quantities()?;
+1284 ~                                     }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:1325:21
+     |
+1325 | /                     if *field == InputField::Category {
+1326 | |                         if *category_index > 0 {
+1327 | |                             *category_index -= 1;
+1328 | |                         }
+1329 | |                     }
+     | |_____________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1325 ~                     if *field == InputField::Category
+1326 ~                         && *category_index > 0 {
+1327 |                             *category_index -= 1;
+1328 ~                         }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:1362:21
+     |
+1362 | /                     if *field == InputField::Category {
+1363 | |                         if *category_index < category_list.len().saturating_sub(1) {
+1364 | |                             *category_index += 1;
+1365 | |                         }
+1366 | |                     }
+     | |_____________________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1362 ~                     if *field == InputField::Category
+1363 ~                         && *category_index < category_list.len().saturating_sub(1) {
+1364 |                             *category_index += 1;
+1365 ~                         }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:1808:9
+     |
+1808 | /         if self.draw_state.focus_side == FocusSide::Right {
+1809 | |             if let Some(item_index) = self.current_item_index() {
+1810 | |                 self.draw_state.packing_list.items[item_index].packed =
+1811 | |                     !self.draw_state.packing_list.items[item_index].packed;
+1812 | |             }
+1813 | |         }
+     | |_________^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+1808 ~         if self.draw_state.focus_side == FocusSide::Right
+1809 ~             && let Some(item_index) = self.current_item_index() {
+1810 |                 self.draw_state.packing_list.items[item_index].packed =
+1811 |                     !self.draw_state.packing_list.items[item_index].packed;
+1812 ~             }
+     |
+
+warning: this `if` statement can be collapsed
+    --> src/ui/app.rs:2082:12
+     |
+2082 |       } else if trimmed == "~" {
+     |  ____________^
+2083 | |         if let Some(home) = dirs::home_dir() {
+2084 | |             return home;
+2085 | |         }
+2086 | |     }
+     | |_____^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#collapsible_if
+help: collapse nested if block
+     |
+2082 ~     } else if trimmed == "~"
+2083 ~         && let Some(home) = dirs::home_dir() {
+2084 |             return home;
+2085 ~         }
+     |
+
+warning: this function has too many arguments (8/7)
+    --> src/ui/app.rs:3172:1
+     |
+3172 | fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: InputField, name: &str, category: &str, quantity: &str, category_list: &[String], category_index: usize) {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+     = note: `#[warn(clippy::too_many_arguments)]` on by default
+
+warning: clamp-like pattern without using clamp function
+    --> src/ui/app.rs:3174:23
+     |
+3174 |     let popup_width = (size.width * 60 / 100).min(60).max(40);
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace with clamp: `(size.width * 60 / 100).clamp(40, 60)`
+     |
+     = note: clamp will panic if max < min
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#manual_clamp
+     = note: `#[warn(clippy::manual_clamp)]` on by default
+
+warning: this function has too many arguments (8/7)
+    --> src/ui/app.rs:3326:1
+     |
+3326 | fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: InputField, name: &str, category: &str, quantity: &str, category_list: &[String], category_index: usize) {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#too_many_arguments
+
+warning: clamp-like pattern without using clamp function
+    --> src/ui/app.rs:3328:23
+     |
+3328 |     let popup_width = (size.width * 60 / 100).min(60).max(40);
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace with clamp: `(size.width * 60 / 100).clamp(40, 60)`
+     |
+     = note: clamp will panic if max < min
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#manual_clamp
+
+warning: clamp-like pattern without using clamp function
+    --> src/ui/app.rs:3482:23
+     |
+3482 |     let popup_width = (size.width * 40 / 100).min(40).max(30);
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: replace with clamp: `(size.width * 40 / 100).clamp(30, 40)`
+     |
+     = note: clamp will panic if max < min
+     = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#manual_clamp
+
+warning: all variants have the same postfix: `Failed`
+  --> src/ui/error.rs:4:1
+   |
+ 4 | / pub enum UiError {
+ 5 | |     #[error("Failed to initialize terminal: {0}")]
+ 6 | |     TerminalInitializationFailed(String),
+ 7 | |     #[error("Failed to restore terminal: {0}")]
+...  |
+12 | |     InputHandlingFailed(String),
+13 | | }
+   | |_^
+   |
+   = help: remove the postfixes and use full paths to the variants instead of glob imports
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.98.0/index.html#enum_variant_names
+   = note: `#[warn(clippy::enum_variant_names)]` on by default
+
+warning: `pack-liste` (bin "pack-liste") generated 37 warnings (run `cargo clippy --fix --bin "pack-liste" -p pack-liste -- ` to apply 20 suggestions)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.06s

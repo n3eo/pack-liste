@@ -1,0 +1,130 @@
+warning: unnecessary parentheses around block return value
+    --> src/ui/app.rs:3165:65
+     |
+3165 | ...   Span::raw(format!("{:.0}%", if total_selected > 0 { (packed as f32 / total_selected as f32 * 100.0) } else { 0.0 })).bold(),
+     |                                                           ^                                             ^
+     |
+     = note: `#[warn(unused_parens)]` (part of `#[warn(unused)]`) on by default
+help: remove these parentheses
+     |
+3165 -             Span::raw(format!("{:.0}%", if total_selected > 0 { (packed as f32 / total_selected as f32 * 100.0) } else { 0.0 })).bold(),
+3165 +             Span::raw(format!("{:.0}%", if total_selected > 0 { packed as f32 / total_selected as f32 * 100.0 } else { 0.0 })).bold(),
+     |
+
+warning: variable does not need to be mutable
+   --> src/ui/app.rs:484:13
+    |
+484 |         let mut trip_file_path = cli_trip.as_deref().map(resolve_trip_path).unwrap_or_default();
+    |             ----^^^^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: enum `ConfigError` is never used
+ --> src/config/error.rs:4:10
+  |
+4 | pub enum ConfigError {
+  |          ^^^^^^^^^^^
+  |
+  = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: struct `PackingListConfig` is never constructed
+ --> src/config/model.rs:5:12
+  |
+5 | pub struct PackingListConfig {
+  |            ^^^^^^^^^^^^^^^^^
+
+warning: methods `toggle_packed` and `set_quantity` are never used
+  --> src/models/item.rs:36:12
+   |
+17 | impl Item {
+   | --------- methods in this implementation
+...
+36 |     pub fn toggle_packed(&mut self) {
+   |            ^^^^^^^^^^^^^
+...
+40 |     pub fn set_quantity(&mut self, quantity: u32) -> Result<(), String> {
+   |            ^^^^^^^^^^^^
+
+warning: methods `remove_item`, `get_item_mut`, `total_items`, `packed_items`, and `unpacked_items` are never used
+  --> src/models/packing_list.rs:28:12
+   |
+14 | impl PackingList {
+   | ---------------- methods in this implementation
+...
+28 |     pub fn remove_item(&mut self, item_id: &str) -> Option<Item> {
+   |            ^^^^^^^^^^^
+...
+33 |     pub fn get_item_mut(&mut self, item_id: &str) -> Option<&mut Item> {
+   |            ^^^^^^^^^^^^
+...
+37 |     pub fn total_items(&self) -> usize {
+   |            ^^^^^^^^^^^
+...
+41 |     pub fn packed_items(&self) -> usize {
+   |            ^^^^^^^^^^^^
+...
+45 |     pub fn unpacked_items(&self) -> usize {
+   |            ^^^^^^^^^^^^^^
+
+warning: enum `QuantityError` is never used
+ --> src/quantity/error.rs:4:10
+  |
+4 | pub enum QuantityError {
+  |          ^^^^^^^^^^^^^
+
+warning: struct `ItemService` is never constructed
+ --> src/services/item_service.rs:5:12
+  |
+5 | pub struct ItemService;
+  |            ^^^^^^^^^^^
+
+warning: associated items `new`, `update_quantity`, and `toggle_packed` are never used
+  --> src/services/item_service.rs:8:12
+   |
+ 7 | impl ItemService {
+   | ---------------- associated items in this implementation
+ 8 |     pub fn new() -> Self {
+   |            ^^^
+...
+12 |     pub fn update_quantity(&self, item: &mut Item, new_quantity: u32) -> Result<()> {
+   |            ^^^^^^^^^^^^^^^
+...
+20 |     pub fn toggle_packed(&self, item: &mut Item) -> Result<()> {
+   |            ^^^^^^^^^^^^^
+
+warning: struct `PackingService` is never constructed
+ --> src/services/packing_service.rs:8:12
+  |
+8 | pub struct PackingService {
+  |            ^^^^^^^^^^^^^^
+
+warning: associated items `new`, `create_packing_list`, `rename_packing_list`, `export_packing_list`, and `import_packing_list` are never used
+  --> src/services/packing_service.rs:13:12
+   |
+12 | impl PackingService {
+   | ------------------- associated items in this implementation
+13 |     pub fn new(storage_path: PathBuf) -> Result<Self> {
+   |            ^^^
+...
+19 |     pub fn create_packing_list(&self, name: String) -> Result<PackingList> {
+   |            ^^^^^^^^^^^^^^^^^^^
+...
+26 |     pub fn rename_packing_list(&mut self, list: &mut PackingList, new_name: String) -> Result<()> {
+   |            ^^^^^^^^^^^^^^^^^^^
+...
+34 |     pub fn export_packing_list(&self, list: &PackingList) -> Result<PathBuf> {
+   |            ^^^^^^^^^^^^^^^^^^^
+...
+49 |     pub fn import_packing_list(&self, file_path: &PathBuf) -> Result<PackingList> {
+   |            ^^^^^^^^^^^^^^^^^^^
+
+warning: enum `UiError` is never used
+ --> src/ui/error.rs:4:10
+  |
+4 | pub enum UiError {
+  |          ^^^^^^^
+
+warning: `pack-liste` (bin "pack-liste") generated 12 warnings (run `cargo fix --bin "pack-liste" -p pack-liste` to apply 2 suggestions)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 0.05s
