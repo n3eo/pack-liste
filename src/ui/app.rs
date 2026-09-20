@@ -1,16 +1,19 @@
 use anyhow::{Context, Result};
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
+    Terminal,
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
-    Terminal,
+    widgets::{
+        Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Wrap,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -82,14 +85,42 @@ pub enum InputField {
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputMode {
     Normal,
-    AddingItem { field: InputField, name: String, category: String, quantity: String, category_list: Vec<String>, category_index: usize },
-    EditingItem { index: usize, field: InputField, name: String, category: String, quantity: String, category_list: Vec<String>, category_index: usize },
-    ConfirmDelete { index: usize },
+    AddingItem {
+        field: InputField,
+        name: String,
+        category: String,
+        quantity: String,
+        category_list: Vec<String>,
+        category_index: usize,
+    },
+    EditingItem {
+        index: usize,
+        field: InputField,
+        name: String,
+        category: String,
+        quantity: String,
+        category_list: Vec<String>,
+        category_index: usize,
+    },
+    ConfirmDelete {
+        index: usize,
+    },
 }
 
 pub enum AppState {
     Running,
     Exit,
+}
+
+/// Editing state shared by the add-item and edit-item popups, bundled so the
+/// popup draw functions take one argument instead of eight.
+struct PopupFields<'a> {
+    field: InputField,
+    name: &'a str,
+    category: &'a str,
+    quantity: &'a str,
+    category_list: &'a [String],
+    category_index: usize,
 }
 
 // Config structure for saving to file
@@ -226,7 +257,11 @@ mod tests {
         };
         let yaml = serde_yaml::to_string(&config).unwrap();
         // No "quantity: <n>" line for the auto item
-        assert!(!yaml.lines().any(|l| l.trim_start().starts_with("quantity:")));
+        assert!(
+            !yaml
+                .lines()
+                .any(|l| l.trim_start().starts_with("quantity:"))
+        );
         assert!(yaml.contains("auto_quantity: true"));
     }
 
@@ -239,8 +274,16 @@ mod tests {
             weather: "cold".to_string(),
             selected_activities: vec!["hiking".to_string()],
             items: vec![
-                TripItem { name: "T-Shirt".to_string(), category: "Clothing".to_string(), packed: true },
-                TripItem { name: "Old Item".to_string(), category: "Gone".to_string(), packed: false },
+                TripItem {
+                    name: "T-Shirt".to_string(),
+                    category: "Clothing".to_string(),
+                    packed: true,
+                },
+                TripItem {
+                    name: "Old Item".to_string(),
+                    category: "Gone".to_string(),
+                    packed: false,
+                },
             ],
         };
 
@@ -268,10 +311,7 @@ mod tests {
     fn trip_paths_resolve_relative_absolute_and_tilde() {
         // Relative names resolve against the current working directory
         let cwd = std::env::current_dir().unwrap();
-        assert_eq!(
-            resolve_trip_path("my-trip.yaml"),
-            cwd.join("my-trip.yaml")
-        );
+        assert_eq!(resolve_trip_path("my-trip.yaml"), cwd.join("my-trip.yaml"));
         assert_eq!(
             resolve_trip_path("sub/my-trip.yaml"),
             cwd.join("sub/my-trip.yaml")
@@ -285,7 +325,10 @@ mod tests {
 
         // ~ expands to the home directory
         let home = dirs::home_dir().unwrap();
-        assert_eq!(resolve_trip_path("~/my-trip.yaml"), home.join("my-trip.yaml"));
+        assert_eq!(
+            resolve_trip_path("~/my-trip.yaml"),
+            home.join("my-trip.yaml")
+        );
         assert_eq!(resolve_trip_path("~"), home);
     }
 }
@@ -398,9 +441,13 @@ impl AppDrawState {
     fn left_rows(&self) -> Vec<PanelRow> {
         // Rows of the left panel in display order: each category header,
         // followed by its items unless the category is collapsed
-        let mut categories_map: std::collections::BTreeMap<String, Vec<usize>> = std::collections::BTreeMap::new();
+        let mut categories_map: std::collections::BTreeMap<String, Vec<usize>> =
+            std::collections::BTreeMap::new();
         for (idx, item) in self.packing_list.items.iter().enumerate() {
-            categories_map.entry(item.category.clone()).or_default().push(idx);
+            categories_map
+                .entry(item.category.clone())
+                .or_default()
+                .push(idx);
         }
 
         let mut rows = Vec::new();
@@ -418,15 +465,19 @@ impl AppDrawState {
     fn right_item_order(&self) -> Vec<usize> {
         // Selected items in the order they are displayed on the right
         // panel (grouped by category)
-        let mut categories_map: std::collections::BTreeMap<String, Vec<usize>> = std::collections::BTreeMap::new();
+        let mut categories_map: std::collections::BTreeMap<String, Vec<usize>> =
+            std::collections::BTreeMap::new();
         for (idx, item) in self.packing_list.items.iter().enumerate() {
             if item.editable {
-                categories_map.entry(item.category.clone()).or_default().push(idx);
+                categories_map
+                    .entry(item.category.clone())
+                    .or_default()
+                    .push(idx);
             }
         }
 
         let mut order = Vec::new();
-        for (_, indices) in &categories_map {
+        for indices in categories_map.values() {
             order.extend(indices);
         }
         order
@@ -436,7 +487,11 @@ impl AppDrawState {
     fn active_rows(&self) -> Vec<PanelRow> {
         match self.focus_side {
             FocusSide::Left => self.left_rows(),
-            FocusSide::Right => self.right_item_order().into_iter().map(PanelRow::Item).collect(),
+            FocusSide::Right => self
+                .right_item_order()
+                .into_iter()
+                .map(PanelRow::Item)
+                .collect(),
         }
     }
 }
@@ -452,15 +507,13 @@ pub struct App {
 impl App {
     pub fn new(trip_file_arg: Option<String>) -> Result<Self> {
         // Initialize terminal
-        enable_raw_mode()
-            .context("Failed to enable raw mode")?;
+        enable_raw_mode().context("Failed to enable raw mode")?;
         stdout()
             .execute(EnterAlternateScreen)
             .context("Failed to enter alternate screen")?;
 
         let backend = CrosstermBackend::new(stdout());
-        let terminal = Terminal::new(backend)
-            .context("Failed to create terminal")?;
+        let terminal = Terminal::new(backend).context("Failed to create terminal")?;
 
         // Determine config path
         let config_path = dirs::config_dir()
@@ -479,9 +532,15 @@ impl App {
         // A trip file passed on the command line is loaded directly; the
         // remembered path only prompts the user to resume on the welcome screen
         let cli_trip = trip_file_arg.filter(|s| !s.trim().is_empty());
-        let remembered_trip = trip_params.last_trip_file.clone().filter(|s| !s.trim().is_empty());
+        let remembered_trip = trip_params
+            .last_trip_file
+            .clone()
+            .filter(|s| !s.trim().is_empty());
 
-        let mut trip_file_path = cli_trip.as_deref().map(resolve_trip_path).unwrap_or_default();
+        let trip_file_path = cli_trip
+            .as_deref()
+            .map(resolve_trip_path)
+            .unwrap_or_default();
         let mut resume_prompt = false;
         let mut remembered_trip_file: Option<PathBuf> = None;
 
@@ -495,7 +554,9 @@ impl App {
         if !trip_file_path.as_os_str().is_empty() {
             if let Some(mut trip) = TripFile::load(&trip_file_path)? {
                 // Reconcile selected items against the current input config
-                let config_items: Vec<(String, String)> = packing_list.items.iter()
+                let config_items: Vec<(String, String)> = packing_list
+                    .items
+                    .iter()
                     .map(|item| (item.name.clone(), item.category.clone()))
                     .collect();
                 trip.reconcile(&config_items);
@@ -510,7 +571,9 @@ impl App {
                 for item in &mut packing_list.items {
                     item.editable = false;
                     item.packed = false;
-                    if let Some(t) = trip.items.iter()
+                    if let Some(t) = trip
+                        .items
+                        .iter()
                         .find(|t| t.name.eq_ignore_ascii_case(&item.name))
                     {
                         item.editable = true;
@@ -583,7 +646,11 @@ impl App {
     fn save_config(&self) -> Result<()> {
         let config = AppConfig {
             categories: self.get_unique_categories(),
-            items: self.draw_state.packing_list.items.iter()
+            items: self
+                .draw_state
+                .packing_list
+                .items
+                .iter()
                 .map(|item| {
                     let auto = item.auto_quantity;
                     SavedItem {
@@ -601,24 +668,23 @@ impl App {
             modifiers: self.draw_state.modifiers.clone(),
             last_trip_file: if self.draw_state.trip_file_path.as_os_str().is_empty() {
                 // No new path chosen: keep remembering the previous trip file
-                self.draw_state.remembered_trip_file.as_ref()
+                self.draw_state
+                    .remembered_trip_file
+                    .as_ref()
                     .map(|p| p.display().to_string())
             } else {
                 Some(self.draw_state.trip_file_path.display().to_string())
             },
         };
 
-        let yaml = serde_yaml::to_string(&config)
-            .context("Failed to serialize config")?;
+        let yaml = serde_yaml::to_string(&config).context("Failed to serialize config")?;
 
         // Ensure config directory exists
         if let Some(parent) = self.config_path.parent() {
-            fs::create_dir_all(parent)
-                .context("Failed to create config directory")?;
+            fs::create_dir_all(parent).context("Failed to create config directory")?;
         }
 
-        fs::write(&self.config_path, yaml)
-            .context("Failed to write config file")?;
+        fs::write(&self.config_path, yaml).context("Failed to write config file")?;
 
         Ok(())
     }
@@ -635,7 +701,11 @@ impl App {
             travel_style: self.draw_state.travel_style.clone(),
             weather: self.draw_state.weather.clone(),
             selected_activities: self.draw_state.selected_activities.clone(),
-            items: self.draw_state.packing_list.items.iter()
+            items: self
+                .draw_state
+                .packing_list
+                .items
+                .iter()
                 .filter(|item| item.editable)
                 .map(|item| TripItem {
                     name: item.name.clone(),
@@ -649,7 +719,11 @@ impl App {
     }
 
     fn get_unique_categories(&self) -> Vec<String> {
-        let mut categories: Vec<String> = self.draw_state.packing_list.items.iter()
+        let mut categories: Vec<String> = self
+            .draw_state
+            .packing_list
+            .items
+            .iter()
             .map(|item| item.category.clone())
             .collect();
         categories.sort();
@@ -672,7 +746,11 @@ impl App {
         };
 
         // Reconcile selected items against the current input config
-        let config_items: Vec<(String, String)> = self.draw_state.packing_list.items.iter()
+        let config_items: Vec<(String, String)> = self
+            .draw_state
+            .packing_list
+            .items
+            .iter()
             .map(|item| (item.name.clone(), item.category.clone()))
             .collect();
         trip.reconcile(&config_items);
@@ -687,7 +765,9 @@ impl App {
         for item in &mut self.draw_state.packing_list.items {
             item.editable = false;
             item.packed = false;
-            if let Some(t) = trip.items.iter()
+            if let Some(t) = trip
+                .items
+                .iter()
                 .find(|t| t.name.eq_ignore_ascii_case(&item.name))
             {
                 item.editable = true;
@@ -699,7 +779,11 @@ impl App {
     }
 
     fn get_all_categories(&self) -> Vec<String> {
-        let mut categories: Vec<String> = self.draw_state.packing_list.items.iter()
+        let mut categories: Vec<String> = self
+            .draw_state
+            .packing_list
+            .items
+            .iter()
             .map(|item| item.category.clone())
             .collect();
         categories.sort();
@@ -713,7 +797,9 @@ impl App {
         if styles.is_empty() {
             return;
         }
-        let current = styles.iter().position(|m| m.name == self.draw_state.travel_style);
+        let current = styles
+            .iter()
+            .position(|m| m.name == self.draw_state.travel_style);
         let next = match current {
             Some(i) => (i as i32 + direction).rem_euclid(styles.len() as i32) as usize,
             None => 0,
@@ -727,7 +813,9 @@ impl App {
         if weather.is_empty() {
             return;
         }
-        let current = weather.iter().position(|m| m.name == self.draw_state.weather);
+        let current = weather
+            .iter()
+            .position(|m| m.name == self.draw_state.weather);
         let next = match current {
             Some(i) => (i as i32 + direction).rem_euclid(weather.len() as i32) as usize,
             None => 0,
@@ -752,17 +840,28 @@ impl App {
 
     fn update_quantities(&mut self) -> Result<()> {
         // Resolve multipliers from the config; fall back to 1.0 for unknown names
-        let style_multiplier = self.draw_state.modifiers
+        let style_multiplier = self
+            .draw_state
+            .modifiers
             .travel_style_multiplier(&self.draw_state.travel_style)
             .unwrap_or(1.0);
-        let weather_multiplier = self.draw_state.modifiers
+        let weather_multiplier = self
+            .draw_state
+            .modifiers
             .weather_multiplier(&self.draw_state.weather)
             .unwrap_or(1.0);
-        let activity_multipliers: Vec<f32> = self.draw_state.selected_activities.iter()
+        let activity_multipliers: Vec<f32> = self
+            .draw_state
+            .selected_activities
+            .iter()
             .filter_map(|name| self.draw_state.modifiers.activity_multiplier(name))
             .collect();
 
-        let item_specs: Vec<ItemQuantitySpec> = self.draw_state.packing_list.items.iter()
+        let item_specs: Vec<ItemQuantitySpec> = self
+            .draw_state
+            .packing_list
+            .items
+            .iter()
             .map(|item| {
                 if item.auto_quantity {
                     ItemQuantitySpec::Auto
@@ -796,17 +895,10 @@ impl App {
     }
 
     pub fn run(&mut self) -> Result<()> {
-        loop {
-            match self.state {
-                AppState::Running => {
-                    self.draw()?;
-                    if self.handle_input()? {
-                        break;
-                    }
-                }
-                AppState::Exit => {
-                    break;
-                }
+        while let AppState::Running = self.state {
+            self.draw()?;
+            if self.handle_input()? {
+                break;
             }
         }
 
@@ -827,22 +919,51 @@ impl App {
                 Screen::Welcome => {
                     draw_welcome_screen(f, size, &state);
                 }
-                Screen::Main => {
-                    match state.input_mode {
-                        InputMode::Normal => {
-                            draw_main_screen(f, size, &mut state);
-                        }
-                        InputMode::AddingItem { field, ref name, ref category, ref quantity, ref category_list, category_index } => {
-                            draw_add_item_popup(f, size, field, name, category, quantity, category_list, category_index);
-                        }
-                        InputMode::EditingItem { field, ref name, ref category, ref quantity, ref category_list, category_index, .. } => {
-                            draw_edit_item_popup(f, size, field, name, category, quantity, category_list, category_index);
-                        }
-                        InputMode::ConfirmDelete { index } => {
-                            draw_confirm_delete_popup(f, size, index, &state.packing_list);
-                        }
+                Screen::Main => match state.input_mode {
+                    InputMode::Normal => {
+                        draw_main_screen(f, size, &mut state);
                     }
-                }
+                    InputMode::AddingItem {
+                        field,
+                        ref name,
+                        ref category,
+                        ref quantity,
+                        ref category_list,
+                        category_index,
+                    } => {
+                        let fields = PopupFields {
+                            field,
+                            name,
+                            category,
+                            quantity,
+                            category_list,
+                            category_index,
+                        };
+                        draw_add_item_popup(f, size, &fields);
+                    }
+                    InputMode::EditingItem {
+                        field,
+                        ref name,
+                        ref category,
+                        ref quantity,
+                        ref category_list,
+                        category_index,
+                        ..
+                    } => {
+                        let fields = PopupFields {
+                            field,
+                            name,
+                            category,
+                            quantity,
+                            category_list,
+                            category_index,
+                        };
+                        draw_edit_item_popup(f, size, &fields);
+                    }
+                    InputMode::ConfirmDelete { index } => {
+                        draw_confirm_delete_popup(f, size, index, &state.packing_list);
+                    }
+                },
                 Screen::Help => {
                     draw_help_screen(f, size);
                 }
@@ -863,441 +984,483 @@ impl App {
     }
 
     fn handle_input(&mut self) -> Result<bool> {
-        if event::poll(std::time::Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    // Terminate on Ctrl+C from any screen or input mode
-                    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-                        self.state = AppState::Exit;
-                        return Ok(true);
-                    }
+        if event::poll(std::time::Duration::from_millis(100))?
+            && let Event::Key(key) = event::read()?
+            && key.kind == KeyEventKind::Press
+        {
+            // Terminate on Ctrl+C from any screen or input mode
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+                self.state = AppState::Exit;
+                return Ok(true);
+            }
 
-                    // Ctrl+E opens the raw config file editor from any screen
-                    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('e') {
-                        self.open_config_editor()?;
-                        return Ok(false);
-                    }
+            // Ctrl+E opens the raw config file editor from any screen
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('e') {
+                self.open_config_editor()?;
+                return Ok(false);
+            }
 
-                    // Resume prompt: Y/Enter loads the previous trip file,
-                    // N/Esc declines and starts a fresh list
-                    if self.draw_state.resume_prompt {
-                        match key.code {
-                            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
-                                self.draw_state.resume_prompt = false;
-                                if let Some(path) = self.draw_state.remembered_trip_file.clone() {
-                                    let input = path.display().to_string();
-                                    self.apply_trip_file_path(&input)?;
-                                }
-                            }
-                            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                                self.draw_state.resume_prompt = false;
-                                // Fresh list: keep everything selected; the
-                                // remembered path stays saved for the next run
-                                select_all_items(&mut self.draw_state.packing_list);
-                                self.update_quantities()?;
-                            }
-                            _ => {}
+            // Resume prompt: Y/Enter loads the previous trip file,
+            // N/Esc declines and starts a fresh list
+            if self.draw_state.resume_prompt {
+                match key.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                        self.draw_state.resume_prompt = false;
+                        if let Some(path) = self.draw_state.remembered_trip_file.clone() {
+                            let input = path.display().to_string();
+                            self.apply_trip_file_path(&input)?;
                         }
-                        return Ok(false);
                     }
+                    KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                        self.draw_state.resume_prompt = false;
+                        // Fresh list: keep everything selected; the
+                        // remembered path stays saved for the next run
+                        select_all_items(&mut self.draw_state.packing_list);
+                        self.update_quantities()?;
+                    }
+                    _ => {}
+                }
+                return Ok(false);
+            }
 
-                    // Check for Ctrl+Space first
-                    if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char(' ') {
-                        if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
-                            if self.draw_state.focus_side == FocusSide::Left {
-                                self.toggle_category_selection();
-                            }
+            // Check for Ctrl+Space first
+            if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char(' ') {
+                if self.draw_state.screen == Screen::Main
+                    && matches!(self.draw_state.input_mode, InputMode::Normal)
+                    && self.draw_state.focus_side == FocusSide::Left
+                {
+                    self.toggle_category_selection();
+                }
+                return Ok(false);
+            }
+
+            // Left/Right collapse/expand the group under the cursor
+            if self.draw_state.screen == Screen::Main
+                && matches!(self.draw_state.input_mode, InputMode::Normal)
+                && self.draw_state.focus_side == FocusSide::Left
+                && matches!(key.code, KeyCode::Left | KeyCode::Right)
+            {
+                let collapse = key.code == KeyCode::Left;
+                self.set_category_collapsed(collapse);
+                return Ok(false);
+            }
+
+            // Left/Right adjust the value of the focused welcome field
+            if self.draw_state.screen == Screen::Welcome
+                && !self.draw_state.editing_trip_file
+                && matches!(key.code, KeyCode::Left | KeyCode::Right)
+            {
+                let direction = if key.code == KeyCode::Right { 1 } else { -1 };
+                match self.draw_state.focus {
+                    Focus::TripFile => {
+                        // No value to adjust; Enter opens the file name editor
+                    }
+                    Focus::Weekdays => {
+                        let target = self.draw_state.weekdays.get() as i32 + direction;
+                        if target >= Weekdays::MIN as i32
+                            && target <= Weekdays::MAX as i32
+                            && let Ok(new_weekdays) = Weekdays::new(target as u32)
+                        {
+                            self.draw_state.weekdays = new_weekdays;
+                            self.update_quantities()?;
                         }
-                        return Ok(false);
                     }
-
-                    // Left/Right collapse/expand the group under the cursor
-                    if self.draw_state.screen == Screen::Main
-                        && matches!(self.draw_state.input_mode, InputMode::Normal)
-                        && self.draw_state.focus_side == FocusSide::Left
-                        && matches!(key.code, KeyCode::Left | KeyCode::Right)
-                    {
-                        let collapse = key.code == KeyCode::Left;
-                        self.set_category_collapsed(collapse);
-                        return Ok(false);
+                    Focus::TravelStyle => {
+                        self.cycle_travel_style(direction);
+                        self.update_quantities()?;
                     }
-
-                    // Left/Right adjust the value of the focused welcome field
-                    if self.draw_state.screen == Screen::Welcome
-                        && !self.draw_state.editing_trip_file
-                        && matches!(key.code, KeyCode::Left | KeyCode::Right)
-                    {
-                        let direction = if key.code == KeyCode::Right { 1 } else { -1 };
-                        match self.draw_state.focus {
-                            Focus::TripFile => {
-                                // No value to adjust; Enter opens the file name editor
-                            }
-                            Focus::Weekdays => {
-                                let target = self.draw_state.weekdays.get() as i32 + direction;
-                                if target >= Weekdays::MIN as i32 && target <= Weekdays::MAX as i32 {
-                                    if let Ok(new_weekdays) = Weekdays::new(target as u32) {
-                                        self.draw_state.weekdays = new_weekdays;
-                                        self.update_quantities()?;
-                                    }
-                                }
-                            }
-                            Focus::TravelStyle => {
-                                self.cycle_travel_style(direction);
-                                self.update_quantities()?;
-                            }
-                            Focus::Weather => {
-                                self.cycle_weather(direction);
-                                self.update_quantities()?;
-                            }
-                            Focus::Activities => {
-                                let count = self.draw_state.modifiers.activities.len();
-                                let cursor = self.draw_state.activity_cursor as i32 + direction;
-                                if cursor >= 0 && (cursor as usize) < count {
-                                    self.draw_state.activity_cursor = cursor as usize;
-                                }
-                            }
+                    Focus::Weather => {
+                        self.cycle_weather(direction);
+                        self.update_quantities()?;
+                    }
+                    Focus::Activities => {
+                        let count = self.draw_state.modifiers.activities.len();
+                        let cursor = self.draw_state.activity_cursor as i32 + direction;
+                        if cursor >= 0 && (cursor as usize) < count {
+                            self.draw_state.activity_cursor = cursor as usize;
                         }
-                        return Ok(false);
                     }
-                    
-                    // Route text input to the add/edit popups
-                    if self.draw_state.screen == Screen::Main
-                        && matches!(self.draw_state.input_mode, InputMode::AddingItem { .. } | InputMode::EditingItem { .. })
-                        && matches!(key.code, KeyCode::Char(_) | KeyCode::Backspace)
-                    {
-                        self.handle_add_edit_input(key);
-                        return Ok(false);
-                    }
+                }
+                return Ok(false);
+            }
 
-                    // The config screen handles all its own keys
-                    if self.draw_state.screen == Screen::Config {
-                        return self.handle_config_screen_input(key);
-                    }
+            // Route text input to the add/edit popups
+            if self.draw_state.screen == Screen::Main
+                && matches!(
+                    self.draw_state.input_mode,
+                    InputMode::AddingItem { .. } | InputMode::EditingItem { .. }
+                )
+                && matches!(key.code, KeyCode::Char(_) | KeyCode::Backspace)
+            {
+                self.handle_add_edit_input(key);
+                return Ok(false);
+            }
 
-                    // The raw config editor handles all its own keys
-                    if self.draw_state.screen == Screen::ConfigEditor {
-                        return self.handle_config_editor_input(key);
-                    }
+            // The config screen handles all its own keys
+            if self.draw_state.screen == Screen::Config {
+                return self.handle_config_screen_input(key);
+            }
 
-                    // Trip file path editing on the welcome screen
-                    if self.draw_state.screen == Screen::Welcome && self.draw_state.editing_trip_file {
-                        match key.code {
-                            KeyCode::Enter => {
-                                let input = self.draw_state.trip_file_input.trim().to_string();
-                                // The file path is required: empty input keeps the editor open
-                                if !input.is_empty() {
-                                    self.apply_trip_file_path(&input)?;
-                                }
-                            }
-                            KeyCode::Esc => {
-                                self.draw_state.editing_trip_file = false;
-                            }
-                            KeyCode::Backspace => {
-                                self.draw_state.trip_file_input.pop();
-                            }
-                            KeyCode::Char(c) => {
-                                self.draw_state.trip_file_input.push(c);
-                            }
-                            _ => {}
+            // The raw config editor handles all its own keys
+            if self.draw_state.screen == Screen::ConfigEditor {
+                return self.handle_config_editor_input(key);
+            }
+
+            // Trip file path editing on the welcome screen
+            if self.draw_state.screen == Screen::Welcome && self.draw_state.editing_trip_file {
+                match key.code {
+                    KeyCode::Enter => {
+                        let input = self.draw_state.trip_file_input.trim().to_string();
+                        // The file path is required: empty input keeps the editor open
+                        if !input.is_empty() {
+                            self.apply_trip_file_path(&input)?;
                         }
-                        return Ok(false);
                     }
+                    KeyCode::Esc => {
+                        self.draw_state.editing_trip_file = false;
+                    }
+                    KeyCode::Backspace => {
+                        self.draw_state.trip_file_input.pop();
+                    }
+                    KeyCode::Char(c) => {
+                        self.draw_state.trip_file_input.push(c);
+                    }
+                    _ => {}
+                }
+                return Ok(false);
+            }
 
-                    match key.code {
-                        KeyCode::Esc => {
-                            match self.draw_state.screen {
-                                Screen::Welcome => {
-                                    self.state = AppState::Exit;
-                                    return Ok(true);
-                                }
-                                Screen::Help => {
-                                    self.draw_state.screen = self.draw_state.previous_screen;
-                                }
-                                Screen::Config => {
-                                    // Cancel the modifier editor, else leave the config screen
-                                    if self.draw_state.modifier_editor.is_some() {
-                                        self.draw_state.modifier_editor = None;
-                                    } else {
-                                        self.draw_state.screen = self.draw_state.previous_screen;
-                                    }
-                                }
-                                Screen::ConfigEditor => {
-                                    // Discard edits and return
-                                    self.draw_state.screen = self.draw_state.previous_screen;
-                                }
-                                Screen::Main => {
-                                    match self.draw_state.input_mode {
-                                        InputMode::Normal => {
-                                            self.state = AppState::Exit;
-                                            return Ok(true);
-                                        }
-                                        InputMode::AddingItem { .. } | InputMode::EditingItem { .. } | InputMode::ConfirmDelete { .. } => {
-                                            // Cancel adding/editing/confirming
-                                            self.draw_state.input_mode = InputMode::Normal;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        KeyCode::Char('q') => {
+            match key.code {
+                KeyCode::Esc => {
+                    match self.draw_state.screen {
+                        Screen::Welcome => {
                             self.state = AppState::Exit;
                             return Ok(true);
                         }
-                        KeyCode::Char('?') => {
-                            if matches!(self.draw_state.screen, Screen::Main | Screen::Welcome)
-                                && matches!(self.draw_state.input_mode, InputMode::Normal)
+                        Screen::Help => {
+                            self.draw_state.screen = self.draw_state.previous_screen;
+                        }
+                        Screen::Config => {
+                            // Cancel the modifier editor, else leave the config screen
+                            if self.draw_state.modifier_editor.is_some() {
+                                self.draw_state.modifier_editor = None;
+                            } else {
+                                self.draw_state.screen = self.draw_state.previous_screen;
+                            }
+                        }
+                        Screen::ConfigEditor => {
+                            // Discard edits and return
+                            self.draw_state.screen = self.draw_state.previous_screen;
+                        }
+                        Screen::Main => {
+                            match self.draw_state.input_mode {
+                                InputMode::Normal => {
+                                    self.state = AppState::Exit;
+                                    return Ok(true);
+                                }
+                                InputMode::AddingItem { .. }
+                                | InputMode::EditingItem { .. }
+                                | InputMode::ConfirmDelete { .. } => {
+                                    // Cancel adding/editing/confirming
+                                    self.draw_state.input_mode = InputMode::Normal;
+                                }
+                            }
+                        }
+                    }
+                }
+                KeyCode::Char('q') => {
+                    self.state = AppState::Exit;
+                    return Ok(true);
+                }
+                KeyCode::Char('?') => {
+                    if matches!(self.draw_state.screen, Screen::Main | Screen::Welcome)
+                        && matches!(self.draw_state.input_mode, InputMode::Normal)
+                    {
+                        self.draw_state.previous_screen = self.draw_state.screen;
+                        self.draw_state.screen = Screen::Help;
+                    }
+                }
+                KeyCode::Enter => {
+                    match self.draw_state.screen {
+                        Screen::Welcome => {
+                            // Enter on the file field opens its editor;
+                            // a file path is required to continue
+                            if self.draw_state.focus == Focus::TripFile
+                                || self.draw_state.trip_file_path.as_os_str().is_empty()
                             {
-                                self.draw_state.previous_screen = self.draw_state.screen;
-                                self.draw_state.screen = Screen::Help;
+                                self.draw_state.trip_file_input =
+                                    self.draw_state.trip_file_path.display().to_string();
+                                self.draw_state.editing_trip_file = true;
+                            } else {
+                                // Move to main screen after configuring
+                                self.draw_state.screen = Screen::Main;
+                                self.draw_state.focus_side = FocusSide::Left;
+                                self.draw_state.selected_index = 0;
                             }
                         }
-                        KeyCode::Enter => {
-                            match self.draw_state.screen {
-                                Screen::Welcome => {
-                                    // Enter on the file field opens its editor;
-                                    // a file path is required to continue
-                                    if self.draw_state.focus == Focus::TripFile
-                                        || self.draw_state.trip_file_path.as_os_str().is_empty()
-                                    {
-                                        self.draw_state.trip_file_input = self.draw_state.trip_file_path.display().to_string();
-                                        self.draw_state.editing_trip_file = true;
+                        Screen::Help => {
+                            self.draw_state.screen = self.draw_state.previous_screen;
+                        }
+                        Screen::Config => {}
+                        Screen::ConfigEditor => {}
+                        Screen::Main => {
+                            match &self.draw_state.input_mode {
+                                InputMode::Normal => {
+                                    if self.draw_state.focus_side == FocusSide::Left {
+                                        // Toggle selection on left side
+                                        self.toggle_item_selection();
                                     } else {
-                                        // Move to main screen after configuring
-                                        self.draw_state.screen = Screen::Main;
-                                        self.draw_state.focus_side = FocusSide::Left;
-                                        self.draw_state.selected_index = 0;
+                                        // Toggle packed status on right side
+                                        self.toggle_item_packed_right_side();
                                     }
                                 }
-                                Screen::Help => {
-                                    self.draw_state.screen = self.draw_state.previous_screen;
+                                InputMode::AddingItem {
+                                    name,
+                                    category,
+                                    quantity,
+                                    category_index,
+                                    ..
+                                } => {
+                                    // Get the selected category from the list
+                                    let categories = self.get_all_categories();
+                                    let selected_category = if *category_index < categories.len() {
+                                        categories[*category_index].clone()
+                                    } else if !categories.is_empty() {
+                                        categories[0].clone()
+                                    } else {
+                                        category.clone()
+                                    };
+                                    // Save the new item
+                                    self.save_new_item(
+                                        name.clone(),
+                                        selected_category,
+                                        quantity.clone(),
+                                    );
+                                    self.draw_state.input_mode = InputMode::Normal;
                                 }
-                                Screen::Config => {}
-                                Screen::ConfigEditor => {}
-                                Screen::Main => {
-                                    match &self.draw_state.input_mode {
-                                        InputMode::Normal => {
-                                            if self.draw_state.focus_side == FocusSide::Left {
-                                                // Toggle selection on left side
-                                                self.toggle_item_selection();
-                                            } else {
-                                                // Toggle packed status on right side
-                                                self.toggle_item_packed_right_side();
-                                            }
-                                        }
-                                        InputMode::AddingItem { name, category, quantity, category_index, .. } => {
-                                            // Get the selected category from the list
-                                            let categories = self.get_all_categories();
-                                            let selected_category = if *category_index < categories.len() {
-                                                categories[*category_index].clone()
-                                            } else if !categories.is_empty() {
-                                                categories[0].clone()
-                                            } else {
-                                                category.clone()
-                                            };
-                                            // Save the new item
-                                            self.save_new_item(name.clone(), selected_category, quantity.clone());
-                                            self.draw_state.input_mode = InputMode::Normal;
-                                        }
-                                        InputMode::EditingItem { index, name, category, quantity, category_index, .. } => {
-                                            // Get the selected category from the list
-                                            let categories = self.get_all_categories();
-                                            let selected_category = if *category_index < categories.len() {
-                                                categories[*category_index].clone()
-                                            } else if !categories.is_empty() {
-                                                categories[0].clone()
-                                            } else {
-                                                category.clone()
-                                            };
-                                            // Save the edited item
-                                            self.save_edited_item(*index, name.clone(), selected_category, quantity.clone());
-                                            self.draw_state.input_mode = InputMode::Normal;
-                                        }
-                                        InputMode::ConfirmDelete { index } => {
-                                            // Confirm deletion
-                                            self.remove_item_confirmed(*index);
-                                            self.draw_state.input_mode = InputMode::Normal;
-                                            // Save config after deletion
-                                            self.save_config()?;
-                                        }
-                                    }
+                                InputMode::EditingItem {
+                                    index,
+                                    name,
+                                    category,
+                                    quantity,
+                                    category_index,
+                                    ..
+                                } => {
+                                    // Get the selected category from the list
+                                    let categories = self.get_all_categories();
+                                    let selected_category = if *category_index < categories.len() {
+                                        categories[*category_index].clone()
+                                    } else if !categories.is_empty() {
+                                        categories[0].clone()
+                                    } else {
+                                        category.clone()
+                                    };
+                                    // Save the edited item
+                                    self.save_edited_item(
+                                        *index,
+                                        name.clone(),
+                                        selected_category,
+                                        quantity.clone(),
+                                    );
+                                    self.draw_state.input_mode = InputMode::Normal;
+                                }
+                                InputMode::ConfirmDelete { index } => {
+                                    // Confirm deletion
+                                    self.remove_item_confirmed(*index);
+                                    self.draw_state.input_mode = InputMode::Normal;
+                                    // Save config after deletion
+                                    self.save_config()?;
                                 }
                             }
                         }
-                        KeyCode::Tab => {
-                            if self.draw_state.screen == Screen::Main {
-                                match &mut self.draw_state.input_mode {
-                                    InputMode::Normal => {
-                                        // Switch between left and right panels
-                                        self.draw_state.focus_side = match self.draw_state.focus_side {
-                                            FocusSide::Left => FocusSide::Right,
-                                            FocusSide::Right => FocusSide::Left,
-                                        };
-                                        // Reset selected index for the new side
-                                        self.draw_state.selected_index = 0;
-                                        // Mirror the right cursor's category on the left panel
-                                        if self.draw_state.focus_side == FocusSide::Right {
-                                            self.sync_left_view_to_right_cursor();
-                                        }
-                                    }
-                                    InputMode::AddingItem { field, .. } => {
-                                        // Cycle through fields
-                                        *field = match field {
-                                            InputField::Name => InputField::Category,
-                                            InputField::Category => InputField::Quantity,
-                                            InputField::Quantity => InputField::Name,
-                                        };
-                                    }
-                                    InputMode::EditingItem { field, .. } => {
-                                        // Cycle through fields
-                                        *field = match field {
-                                            InputField::Name => InputField::Category,
-                                            InputField::Category => InputField::Quantity,
-                                            InputField::Quantity => InputField::Name,
-                                        };
-                                    }
-                                    _ => {}
-                                }
-                            } else if self.draw_state.screen == Screen::Welcome {
-                                // In welcome screen, Tab cycles through fields
-                                self.draw_state.focus = self.draw_state.focus.next();
-                            }
-                        }
-                        KeyCode::BackTab => {
-                            if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
+                    }
+                }
+                KeyCode::Tab => {
+                    if self.draw_state.screen == Screen::Main {
+                        match &mut self.draw_state.input_mode {
+                            InputMode::Normal => {
+                                // Switch between left and right panels
                                 self.draw_state.focus_side = match self.draw_state.focus_side {
                                     FocusSide::Left => FocusSide::Right,
                                     FocusSide::Right => FocusSide::Left,
                                 };
+                                // Reset selected index for the new side
                                 self.draw_state.selected_index = 0;
                                 // Mirror the right cursor's category on the left panel
                                 if self.draw_state.focus_side == FocusSide::Right {
                                     self.sync_left_view_to_right_cursor();
                                 }
-                            } else if self.draw_state.screen == Screen::Welcome {
-                                self.draw_state.focus = self.draw_state.focus.prev();
                             }
-                        }
-                        KeyCode::Char('c') | KeyCode::Char('C') => {
-                            if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
-                                if self.draw_state.focus_side == FocusSide::Left {
-                                    self.toggle_category_collapse();
-                                }
+                            InputMode::AddingItem { field, .. } => {
+                                // Cycle through fields
+                                *field = match field {
+                                    InputField::Name => InputField::Category,
+                                    InputField::Category => InputField::Quantity,
+                                    InputField::Quantity => InputField::Name,
+                                };
                             }
-                        }
-                        KeyCode::Char(' ') => {
-                            if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
-                                if self.draw_state.focus_side == FocusSide::Left {
-                                    // Toggle selection on left side
-                                    self.toggle_item_selection();
-                                } else {
-                                    // Toggle packed status on right side
-                                    self.toggle_item_packed_right_side();
-                                }
-                            } else if self.draw_state.screen == Screen::Welcome {
-                                // Toggle the activity under the cursor
-                                if self.draw_state.focus == Focus::Activities {
-                                    self.toggle_activity();
-                                }
-                            } else if self.draw_state.screen == Screen::Main {
-                                // Handle space in edit mode for category selection
-                                if let InputMode::EditingItem { field, .. } = &mut self.draw_state.input_mode {
-                                    if *field == InputField::Category {
-                                        // Space toggles category selection in edit mode
-                                        // This is handled by the field cycling
-                                    }
-                                }
+                            InputMode::EditingItem { field, .. } => {
+                                // Cycle through fields
+                                *field = match field {
+                                    InputField::Name => InputField::Category,
+                                    InputField::Category => InputField::Quantity,
+                                    InputField::Quantity => InputField::Name,
+                                };
                             }
+                            _ => {}
                         }
-                        KeyCode::Char('a') | KeyCode::Char('A') => {
-                            if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
-                                if self.draw_state.focus_side == FocusSide::Left {
-                                    // Start adding new item with the current category preselected
-                                    let categories = self.get_all_categories();
-                                    let category_index = self.current_category()
-                                        .and_then(|c| categories.iter().position(|k| k == &c))
-                                        .unwrap_or(0);
-                                    self.draw_state.input_mode = InputMode::AddingItem {
-                                        field: InputField::Name,
-                                        name: String::new(),
-                                        category: String::new(),
-                                        quantity: String::new(),
-                                        category_list: categories,
-                                        category_index,
-                                    };
-                                }
-                            }
+                    } else if self.draw_state.screen == Screen::Welcome {
+                        // In welcome screen, Tab cycles through fields
+                        self.draw_state.focus = self.draw_state.focus.next();
+                    }
+                }
+                KeyCode::BackTab => {
+                    if self.draw_state.screen == Screen::Main
+                        && matches!(self.draw_state.input_mode, InputMode::Normal)
+                    {
+                        self.draw_state.focus_side = match self.draw_state.focus_side {
+                            FocusSide::Left => FocusSide::Right,
+                            FocusSide::Right => FocusSide::Left,
+                        };
+                        self.draw_state.selected_index = 0;
+                        // Mirror the right cursor's category on the left panel
+                        if self.draw_state.focus_side == FocusSide::Right {
+                            self.sync_left_view_to_right_cursor();
                         }
-                        KeyCode::Char('e') | KeyCode::Char('E') => {
-                            if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
-                                if self.draw_state.focus_side == FocusSide::Left {
-                                    // Start editing selected item
-                                    self.start_editing_item();
-                                }
-                            }
+                    } else if self.draw_state.screen == Screen::Welcome {
+                        self.draw_state.focus = self.draw_state.focus.prev();
+                    }
+                }
+                KeyCode::Char('c') | KeyCode::Char('C') => {
+                    if self.draw_state.screen == Screen::Main
+                        && matches!(self.draw_state.input_mode, InputMode::Normal)
+                        && self.draw_state.focus_side == FocusSide::Left
+                    {
+                        self.toggle_category_collapse();
+                    }
+                }
+                KeyCode::Char(' ') => {
+                    if self.draw_state.screen == Screen::Main
+                        && matches!(self.draw_state.input_mode, InputMode::Normal)
+                    {
+                        if self.draw_state.focus_side == FocusSide::Left {
+                            // Toggle selection on left side
+                            self.toggle_item_selection();
+                        } else {
+                            // Toggle packed status on right side
+                            self.toggle_item_packed_right_side();
                         }
-                        KeyCode::Char('d') | KeyCode::Char('D') => {
-                            if self.draw_state.screen == Screen::Main && matches!(self.draw_state.input_mode, InputMode::Normal) {
-                                if self.draw_state.focus_side == FocusSide::Left {
-                                    // Ask for confirmation before deleting
-                                    if let Some(item_index) = self.current_item_index() {
-                                        self.draw_state.input_mode = InputMode::ConfirmDelete {
-                                            index: item_index,
-                                        };
-                                    }
-                                }
-                            }
+                    } else if self.draw_state.screen == Screen::Welcome {
+                        // Toggle the activity under the cursor
+                        if self.draw_state.focus == Focus::Activities {
+                            self.toggle_activity();
                         }
-                        KeyCode::Up => {
-                            self.handle_up()?;
+                    } else if self.draw_state.screen == Screen::Main {
+                        // Handle space in edit mode for category selection
+                        if let InputMode::EditingItem { field, .. } =
+                            &mut self.draw_state.input_mode
+                            && *field == InputField::Category
+                        {
+                            // Space toggles category selection in edit mode
+                            // This is handled by the field cycling
                         }
-                        KeyCode::Down => {
-                            self.handle_down()?;
+                    }
+                }
+                KeyCode::Char('a') | KeyCode::Char('A') => {
+                    if self.draw_state.screen == Screen::Main
+                        && matches!(self.draw_state.input_mode, InputMode::Normal)
+                        && self.draw_state.focus_side == FocusSide::Left
+                    {
+                        // Start adding new item with the current category preselected
+                        let categories = self.get_all_categories();
+                        let category_index = self
+                            .current_category()
+                            .and_then(|c| categories.iter().position(|k| k == &c))
+                            .unwrap_or(0);
+                        self.draw_state.input_mode = InputMode::AddingItem {
+                            field: InputField::Name,
+                            name: String::new(),
+                            category: String::new(),
+                            quantity: String::new(),
+                            category_list: categories,
+                            category_index,
+                        };
+                    }
+                }
+                KeyCode::Char('e') | KeyCode::Char('E') => {
+                    if self.draw_state.screen == Screen::Main
+                        && matches!(self.draw_state.input_mode, InputMode::Normal)
+                        && self.draw_state.focus_side == FocusSide::Left
+                    {
+                        // Start editing selected item
+                        self.start_editing_item();
+                    }
+                }
+                KeyCode::Char('d') | KeyCode::Char('D') => {
+                    if self.draw_state.screen == Screen::Main
+                        && matches!(self.draw_state.input_mode, InputMode::Normal)
+                        && self.draw_state.focus_side == FocusSide::Left
+                    {
+                        // Ask for confirmation before deleting
+                        if let Some(item_index) = self.current_item_index() {
+                            self.draw_state.input_mode =
+                                InputMode::ConfirmDelete { index: item_index };
                         }
-                        KeyCode::Char('f') | KeyCode::Char('F') => {
-                            if self.draw_state.screen == Screen::Welcome {
-                                // Edit the trip file path
-                                self.draw_state.trip_file_input = self.draw_state.trip_file_path.display().to_string();
-                                self.draw_state.editing_trip_file = true;
-                            }
-                        }
-                        KeyCode::Char('o') | KeyCode::Char('O') => {
-                            // Open the config screen from any screen
-                            if !matches!(self.draw_state.screen, Screen::Config | Screen::ConfigEditor) {
-                                self.draw_state.previous_screen = self.draw_state.screen;
-                                self.draw_state.screen = Screen::Config;
-                            }
-                        }
-                        KeyCode::Char('+') => {
-                            if self.draw_state.screen == Screen::Welcome && self.draw_state.focus == Focus::Weekdays {
-                                if let Ok(new_weekdays) = Weekdays::new(self.draw_state.weekdays.get() + 1) {
-                                    self.draw_state.weekdays = new_weekdays;
-                                    self.update_quantities()?;
-                                }
-                            }
-                        }
-                        KeyCode::Char('-') => {
-                            if self.draw_state.screen == Screen::Welcome && self.draw_state.focus == Focus::Weekdays {
-                                if self.draw_state.weekdays.get() > Weekdays::MIN {
-                                    if let Ok(new_weekdays) = Weekdays::new(self.draw_state.weekdays.get() - 1) {
-                                        self.draw_state.weekdays = new_weekdays;
-                                        self.update_quantities()?;
-                                    }
-                                }
-                            }
-                        }
-                        // Handle input mode for adding/editing item
-                        _ => {
-                            if self.draw_state.screen == Screen::Main {
-                                self.handle_add_edit_input(key);
-                            }
-                        }
+                    }
+                }
+                KeyCode::Up => {
+                    self.handle_up()?;
+                }
+                KeyCode::Down => {
+                    self.handle_down()?;
+                }
+                KeyCode::Char('f') | KeyCode::Char('F') => {
+                    if self.draw_state.screen == Screen::Welcome {
+                        // Edit the trip file path
+                        self.draw_state.trip_file_input =
+                            self.draw_state.trip_file_path.display().to_string();
+                        self.draw_state.editing_trip_file = true;
+                    }
+                }
+                KeyCode::Char('o') | KeyCode::Char('O') => {
+                    // Open the config screen from any screen
+                    if !matches!(
+                        self.draw_state.screen,
+                        Screen::Config | Screen::ConfigEditor
+                    ) {
+                        self.draw_state.previous_screen = self.draw_state.screen;
+                        self.draw_state.screen = Screen::Config;
+                    }
+                }
+                KeyCode::Char('+') => {
+                    if self.draw_state.screen == Screen::Welcome
+                        && self.draw_state.focus == Focus::Weekdays
+                        && let Ok(new_weekdays) = Weekdays::new(self.draw_state.weekdays.get() + 1)
+                    {
+                        self.draw_state.weekdays = new_weekdays;
+                        self.update_quantities()?;
+                    }
+                }
+                KeyCode::Char('-') => {
+                    if self.draw_state.screen == Screen::Welcome
+                        && self.draw_state.focus == Focus::Weekdays
+                        && self.draw_state.weekdays.get() > Weekdays::MIN
+                        && let Ok(new_weekdays) = Weekdays::new(self.draw_state.weekdays.get() - 1)
+                    {
+                        self.draw_state.weekdays = new_weekdays;
+                        self.update_quantities()?;
+                    }
+                }
+                // Handle input mode for adding/editing item
+                _ => {
+                    if self.draw_state.screen == Screen::Main {
+                        self.handle_add_edit_input(key);
                     }
                 }
             }
         }
         Ok(false)
     }
-
     fn handle_up(&mut self) -> Result<()> {
         match self.draw_state.screen {
             Screen::Welcome => {
@@ -1315,17 +1478,25 @@ impl App {
                     if self.draw_state.focus_side == FocusSide::Right {
                         self.sync_left_view_to_right_cursor();
                     }
-                } else if let InputMode::AddingItem { field, category_index, .. } = &mut self.draw_state.input_mode {
+                } else if let InputMode::AddingItem {
+                    field,
+                    category_index,
+                    ..
+                } = &mut self.draw_state.input_mode
+                {
                     // Only navigate category dropdown when category field is selected
                     if *field == InputField::Category && *category_index > 0 {
                         *category_index -= 1;
                     }
-                } else if let InputMode::EditingItem { field, category_index, .. } = &mut self.draw_state.input_mode {
+                } else if let InputMode::EditingItem {
+                    field,
+                    category_index,
+                    ..
+                } = &mut self.draw_state.input_mode
+                {
                     // Only navigate category dropdown when category field is selected
-                    if *field == InputField::Category {
-                        if *category_index > 0 {
-                            *category_index -= 1;
-                        }
+                    if *field == InputField::Category && *category_index > 0 {
+                        *category_index -= 1;
                     }
                 }
             }
@@ -1352,17 +1523,31 @@ impl App {
                     if self.draw_state.focus_side == FocusSide::Right {
                         self.sync_left_view_to_right_cursor();
                     }
-                } else if let InputMode::AddingItem { field, category_index, category_list, .. } = &mut self.draw_state.input_mode {
+                } else if let InputMode::AddingItem {
+                    field,
+                    category_index,
+                    category_list,
+                    ..
+                } = &mut self.draw_state.input_mode
+                {
                     // Only navigate category dropdown when category field is selected
-                    if *field == InputField::Category && *category_index < category_list.len().saturating_sub(1) {
+                    if *field == InputField::Category
+                        && *category_index < category_list.len().saturating_sub(1)
+                    {
                         *category_index += 1;
                     }
-                } else if let InputMode::EditingItem { field, category_index, category_list, .. } = &mut self.draw_state.input_mode {
+                } else if let InputMode::EditingItem {
+                    field,
+                    category_index,
+                    category_list,
+                    ..
+                } = &mut self.draw_state.input_mode
+                {
                     // Only navigate category dropdown when category field is selected
-                    if *field == InputField::Category {
-                        if *category_index < category_list.len().saturating_sub(1) {
-                            *category_index += 1;
-                        }
+                    if *field == InputField::Category
+                        && *category_index < category_list.len().saturating_sub(1)
+                    {
+                        *category_index += 1;
                     }
                 }
             }
@@ -1372,7 +1557,10 @@ impl App {
     }
 
     // The modifiers of the focused config section
-    fn config_section_modifiers(&self, section: ConfigSection) -> &Vec<crate::config::modifiers::ModifierConfig> {
+    fn config_section_modifiers(
+        &self,
+        section: ConfigSection,
+    ) -> &Vec<crate::config::modifiers::ModifierConfig> {
         match section {
             ConfigSection::TravelStyles => &self.draw_state.modifiers.travel_styles,
             ConfigSection::Weather => &self.draw_state.modifiers.weather,
@@ -1380,7 +1568,10 @@ impl App {
         }
     }
 
-    fn config_section_modifiers_mut(&mut self, section: ConfigSection) -> &mut Vec<crate::config::modifiers::ModifierConfig> {
+    fn config_section_modifiers_mut(
+        &mut self,
+        section: ConfigSection,
+    ) -> &mut Vec<crate::config::modifiers::ModifierConfig> {
         match section {
             ConfigSection::TravelStyles => &mut self.draw_state.modifiers.travel_styles,
             ConfigSection::Weather => &mut self.draw_state.modifiers.weather,
@@ -1393,8 +1584,7 @@ impl App {
         if self.draw_state.screen == Screen::ConfigEditor {
             return Ok(());
         }
-        let text = fs::read_to_string(&self.config_path)
-            .context("Failed to read config file")?;
+        let text = fs::read_to_string(&self.config_path).context("Failed to read config file")?;
         self.draw_state.config_editor_text = text.lines().map(|l| l.to_string()).collect();
         if self.draw_state.config_editor_text.is_empty() {
             self.draw_state.config_editor_text.push(String::new());
@@ -1510,7 +1700,11 @@ impl App {
 
         // Snapshot the trip state (selection/packed) so reloading the input
         // config does not reset the current trip
-        let trip_state: Vec<(String, bool, bool)> = self.draw_state.packing_list.items.iter()
+        let trip_state: Vec<(String, bool, bool)> = self
+            .draw_state
+            .packing_list
+            .items
+            .iter()
             .map(|item| (item.name.clone(), item.editable, item.packed))
             .collect();
 
@@ -1525,7 +1719,8 @@ impl App {
 
         // Restore the trip state for items that still exist (by name)
         for item in &mut self.draw_state.packing_list.items {
-            if let Some((_, editable, packed)) = trip_state.iter()
+            if let Some((_, editable, packed)) = trip_state
+                .iter()
                 .find(|(name, _, _)| name.eq_ignore_ascii_case(&item.name))
             {
                 item.editable = *editable;
@@ -1578,24 +1773,32 @@ impl App {
                         self.update_quantities()?;
                     }
                 }
-                KeyCode::Backspace => {
-                    match editor.field {
-                        ModifierField::Name => { editor.name.pop(); }
-                        ModifierField::Multiplier => { editor.multiplier.pop(); }
+                KeyCode::Backspace => match editor.field {
+                    ModifierField::Name => {
+                        editor.name.pop();
                     }
-                }
-                KeyCode::Char(c) => {
-                    match editor.field {
-                        ModifierField::Name => { editor.name.push(c); }
-                        ModifierField::Multiplier => { editor.multiplier.push(c); }
+                    ModifierField::Multiplier => {
+                        editor.multiplier.pop();
                     }
-                }
+                },
+                KeyCode::Char(c) => match editor.field {
+                    ModifierField::Name => {
+                        editor.name.push(c);
+                    }
+                    ModifierField::Multiplier => {
+                        editor.multiplier.push(c);
+                    }
+                },
                 _ => {}
             }
             return Ok(false);
         }
 
         match key.code {
+            KeyCode::Esc => {
+                // Leave the config screen, back to where it was opened from
+                self.draw_state.screen = self.draw_state.previous_screen;
+            }
             KeyCode::Tab => {
                 self.draw_state.config_section = self.draw_state.config_section.next();
                 self.draw_state.config_cursor = 0;
@@ -1612,7 +1815,9 @@ impl App {
                 }
             }
             KeyCode::Down => {
-                let count = self.config_section_modifiers(self.draw_state.config_section).len();
+                let count = self
+                    .config_section_modifiers(self.draw_state.config_section)
+                    .len();
                 if self.draw_state.config_cursor + 1 < count {
                     self.draw_state.config_cursor += 1;
                 }
@@ -1665,61 +1870,94 @@ impl App {
     /// Keep the current travel style / weather / activity selections valid
     /// after modifiers change
     fn reconcile_selections(&mut self) {
-        if self.draw_state.modifiers.travel_style_multiplier(&self.draw_state.travel_style).is_none() {
-            self.draw_state.travel_style = self.draw_state.modifiers.travel_styles.first()
+        if self
+            .draw_state
+            .modifiers
+            .travel_style_multiplier(&self.draw_state.travel_style)
+            .is_none()
+        {
+            self.draw_state.travel_style = self
+                .draw_state
+                .modifiers
+                .travel_styles
+                .first()
                 .map(|m| m.name.clone())
                 .unwrap_or_default();
         }
-        if self.draw_state.modifiers.weather_multiplier(&self.draw_state.weather).is_none() {
-            self.draw_state.weather = self.draw_state.modifiers.weather.first()
+        if self
+            .draw_state
+            .modifiers
+            .weather_multiplier(&self.draw_state.weather)
+            .is_none()
+        {
+            self.draw_state.weather = self
+                .draw_state
+                .modifiers
+                .weather
+                .first()
                 .map(|m| m.name.clone())
                 .unwrap_or_default();
         }
         self.draw_state.selected_activities.retain(|name| {
-            self.draw_state.modifiers.activity_multiplier(name).is_some()
+            self.draw_state
+                .modifiers
+                .activity_multiplier(name)
+                .is_some()
         });
     }
 
     fn handle_add_edit_input(&mut self, key: event::KeyEvent) {
         match &mut self.draw_state.input_mode {
-            InputMode::AddingItem { field, name, category, quantity, .. } => {
-                match key.code {
-                    KeyCode::Char(c) => {
-                        match field {
-                            InputField::Name => name.push(c),
-                            InputField::Category => category.push(c),
-                            InputField::Quantity => quantity.push(c),
-                        }
+            InputMode::AddingItem {
+                field,
+                name,
+                category,
+                quantity,
+                ..
+            } => match key.code {
+                KeyCode::Char(c) => match field {
+                    InputField::Name => name.push(c),
+                    InputField::Category => category.push(c),
+                    InputField::Quantity => quantity.push(c),
+                },
+                KeyCode::Backspace => match field {
+                    InputField::Name => {
+                        name.pop();
                     }
-                    KeyCode::Backspace => {
-                        match field {
-                            InputField::Name => { name.pop(); }
-                            InputField::Category => { category.pop(); }
-                            InputField::Quantity => { quantity.pop(); }
-                        }
+                    InputField::Category => {
+                        category.pop();
                     }
-                    _ => {}
-                }
-            }
-            InputMode::EditingItem { field, name, category, quantity, .. } => {
-                match key.code {
-                    KeyCode::Char(c) => {
-                        match field {
-                            InputField::Name => name.push(c),
-                            InputField::Category => category.push(c),
-                            InputField::Quantity => quantity.push(c),
-                        }
+                    InputField::Quantity => {
+                        quantity.pop();
                     }
-                    KeyCode::Backspace => {
-                        match field {
-                            InputField::Name => { name.pop(); }
-                            InputField::Category => { category.pop(); }
-                            InputField::Quantity => { quantity.pop(); }
-                        }
+                },
+                _ => {}
+            },
+            InputMode::EditingItem {
+                field,
+                name,
+                category,
+                quantity,
+                ..
+            } => match key.code {
+                KeyCode::Char(c) => match field {
+                    InputField::Name => name.push(c),
+                    InputField::Category => category.push(c),
+                    InputField::Quantity => quantity.push(c),
+                },
+                KeyCode::Backspace => match field {
+                    InputField::Name => {
+                        name.pop();
                     }
-                    _ => {}
-                }
-            }
+                    InputField::Category => {
+                        category.pop();
+                    }
+                    InputField::Quantity => {
+                        quantity.pop();
+                    }
+                },
+                _ => {}
+            },
             _ => {}
         }
     }
@@ -1738,7 +1976,9 @@ impl App {
         let rows = self.draw_state.active_rows();
         match rows.get(self.draw_state.selected_index) {
             Some(PanelRow::Category(c)) => Some(c.clone()),
-            Some(PanelRow::Item(index)) => Some(self.draw_state.packing_list.items[*index].category.clone()),
+            Some(PanelRow::Item(index)) => {
+                Some(self.draw_state.packing_list.items[*index].category.clone())
+            }
             None => None,
         }
     }
@@ -1757,17 +1997,23 @@ impl App {
             }
             // Move the cursor to the category's header row
             let rows = self.draw_state.active_rows();
-            if let Some(row) = rows.iter().position(|r| matches!(r, PanelRow::Category(c) if *c == category)) {
+            if let Some(row) = rows
+                .iter()
+                .position(|r| matches!(r, PanelRow::Category(c) if *c == category))
+            {
                 self.draw_state.selected_index = row;
             }
         } else {
-            self.draw_state.collapsed_categories.retain(|c| c != &category);
+            self.draw_state
+                .collapsed_categories
+                .retain(|c| c != &category);
         }
     }
 
     fn toggle_category_collapse(&mut self) {
         // Toggle collapse of the category the cursor is on
-        let collapsed = self.current_category()
+        let collapsed = self
+            .current_category()
             .map(|c| self.draw_state.collapsed_categories.contains(&c))
             .unwrap_or(false);
         self.set_category_collapsed(!collapsed);
@@ -1789,7 +2035,11 @@ impl App {
             return;
         };
 
-        let was_selected = self.draw_state.packing_list.items.iter()
+        let was_selected = self
+            .draw_state
+            .packing_list
+            .items
+            .iter()
             .any(|item| item.category == category && item.editable);
 
         for item in &mut self.draw_state.packing_list.items {
@@ -1805,11 +2055,11 @@ impl App {
 
     fn toggle_item_packed_right_side(&mut self) {
         // Only toggle packed status when on right side
-        if self.draw_state.focus_side == FocusSide::Right {
-            if let Some(item_index) = self.current_item_index() {
-                self.draw_state.packing_list.items[item_index].packed =
-                    !self.draw_state.packing_list.items[item_index].packed;
-            }
+        if self.draw_state.focus_side == FocusSide::Right
+            && let Some(item_index) = self.current_item_index()
+        {
+            self.draw_state.packing_list.items[item_index].packed =
+                !self.draw_state.packing_list.items[item_index].packed;
         }
     }
 
@@ -1820,24 +2070,35 @@ impl App {
         let Some(item_index) = self.current_item_index() else {
             return;
         };
-        let category = self.draw_state.packing_list.items[item_index].category.clone();
+        let category = self.draw_state.packing_list.items[item_index]
+            .category
+            .clone();
 
         // Collapse everything, then expand only the cursor's category
-        let all_categories: Vec<String> = self.draw_state.packing_list.items.iter()
+        let all_categories: Vec<String> = self
+            .draw_state
+            .packing_list
+            .items
+            .iter()
             .map(|item| item.category.clone())
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
         self.draw_state.collapsed_categories = all_categories;
-        self.draw_state.collapsed_categories.retain(|c| c != &category);
+        self.draw_state
+            .collapsed_categories
+            .retain(|c| c != &category);
     }
 
     fn start_editing_item(&mut self) {
         if let Some(item_index) = self.current_item_index() {
             let item = &self.draw_state.packing_list.items[item_index];
             let categories = self.get_all_categories();
-            let category_index = categories.iter().position(|c| c == &item.category).unwrap_or(0);
-            
+            let category_index = categories
+                .iter()
+                .position(|c| c == &item.category)
+                .unwrap_or(0);
+
             self.draw_state.input_mode = InputMode::EditingItem {
                 index: item_index,
                 field: InputField::Name,
@@ -1853,41 +2114,45 @@ impl App {
     fn save_new_item(&mut self, name: String, category: String, quantity: String) {
         // Parse quantity
         let qty = quantity.parse::<u32>().unwrap_or(1);
-        
+
         // Create new item
         let new_id = format!("item_{}", self.draw_state.packing_list.items.len() + 1);
-        let new_name = if name.is_empty() { "New Item".to_string() } else { name };
-        let new_category = if category.is_empty() { 
+        let new_name = if name.is_empty() {
+            "New Item".to_string()
+        } else {
+            name
+        };
+        let new_category = if category.is_empty() {
             // Use first category or default
             if !self.draw_state.packing_list.items.is_empty() {
                 self.draw_state.packing_list.items[0].category.clone()
             } else {
                 "Other".to_string()
             }
-        } else { category };
-        
-        self.draw_state.packing_list.add_item(Item::new(
-            new_id,
-            new_name,
-            new_category,
-            qty,
-        ));
-        
+        } else {
+            category
+        };
+
+        self.draw_state
+            .packing_list
+            .add_item(Item::new(new_id, new_name, new_category, qty));
+
         // Update quantities for the new item
         self.update_quantities().ok();
-        
+
         // Save config after adding
         self.save_config().ok();
-        
+
         // Reset selection to the new item, clamped to the visible rows
         let rows = self.draw_state.active_rows();
-        self.draw_state.selected_index = (self.draw_state.packing_list.items.len() - 1).min(rows.len().saturating_sub(1));
+        self.draw_state.selected_index =
+            (self.draw_state.packing_list.items.len() - 1).min(rows.len().saturating_sub(1));
     }
 
     fn save_edited_item(&mut self, index: usize, name: String, category: String, quantity: String) {
         if index < self.draw_state.packing_list.items.len() {
             let item = &mut self.draw_state.packing_list.items[index];
-            
+
             // Update fields if they're not empty
             if !name.is_empty() {
                 item.name = name;
@@ -1898,7 +2163,7 @@ impl App {
             if let Ok(qty) = quantity.parse::<u32>() {
                 item.quantity = qty;
             }
-            
+
             // Save config after editing
             self.save_config().ok();
         }
@@ -1928,11 +2193,10 @@ struct TripParams {
 }
 
 fn load_config(config_file: &PathBuf) -> Result<(PackingList, TripParams)> {
-    let yaml_content = fs::read_to_string(config_file)
-        .context("Failed to read config file")?;
+    let yaml_content = fs::read_to_string(config_file).context("Failed to read config file")?;
 
-    let config: AppConfig = serde_yaml::from_str(&yaml_content)
-        .context("Failed to parse config file")?;
+    let config: AppConfig =
+        serde_yaml::from_str(&yaml_content).context("Failed to parse config file")?;
 
     // Create packing list from config
     let mut packing_list = PackingList::new("My Trip".to_string());
@@ -1940,13 +2204,12 @@ fn load_config(config_file: &PathBuf) -> Result<(PackingList, TripParams)> {
     for saved_item in config.items {
         let new_id = format!("item_{}", packing_list.items.len() + 1);
         let auto = saved_item.auto_quantity;
-        let fixed_quantity = if auto { 1 } else { saved_item.quantity.unwrap_or(1) };
-        let mut item = Item::new(
-            new_id,
-            saved_item.name,
-            saved_item.category,
-            fixed_quantity,
-        );
+        let fixed_quantity = if auto {
+            1
+        } else {
+            saved_item.quantity.unwrap_or(1)
+        };
+        let mut item = Item::new(new_id, saved_item.name, saved_item.category, fixed_quantity);
         item.auto_quantity = auto;
         packing_list.add_item(item);
     }
@@ -2018,7 +2281,9 @@ fn create_default_config(config_file: &PathBuf) -> Result<(PackingList, TripPara
             "Accessories".to_string(),
             "Miscellaneous".to_string(),
         ],
-        items: packing_list.items.iter()
+        items: packing_list
+            .items
+            .iter()
             .map(|item| {
                 let auto = item.auto_quantity;
                 SavedItem {
@@ -2037,16 +2302,13 @@ fn create_default_config(config_file: &PathBuf) -> Result<(PackingList, TripPara
         last_trip_file: None,
     };
 
-    let yaml = serde_yaml::to_string(&config)
-        .context("Failed to serialize default config")?;
+    let yaml = serde_yaml::to_string(&config).context("Failed to serialize default config")?;
 
     if let Some(parent) = config_file.parent() {
-        fs::create_dir_all(parent)
-            .context("Failed to create config directory")?;
+        fs::create_dir_all(parent).context("Failed to create config directory")?;
     }
 
-    fs::write(config_file, yaml)
-        .context("Failed to write default config file")?;
+    fs::write(config_file, yaml).context("Failed to write default config file")?;
 
     Ok((packing_list, trip_params))
 }
@@ -2075,20 +2337,22 @@ fn select_all_items(packing_list: &mut PackingList) {
 /// - absolute paths are kept as-is
 fn resolve_trip_path(input: &str) -> PathBuf {
     let trimmed = input.trim();
-    if let Some(rest) = trimmed.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    } else if trimmed == "~" {
-        if let Some(home) = dirs::home_dir() {
-            return home;
-        }
+    if let Some(rest) = trimmed.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
+    } else if trimmed == "~"
+        && let Some(home) = dirs::home_dir()
+    {
+        return home;
     }
     let path = Path::new(trimmed);
     if path.is_absolute() {
         path.to_path_buf()
     } else {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(path)
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
     }
 }
 
@@ -2101,7 +2365,8 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
             Constraint::Min(12),
             Constraint::Length(4),
         ])
-        .split(size) else {
+        .split(size)
+    else {
         return;
     };
 
@@ -2138,11 +2403,13 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
     let file_block = Block::default()
         .title("Packing List File (Required)")
         .borders(Borders::ALL)
-        .border_style(if state.focus == Focus::TripFile || state.editing_trip_file {
-            Style::new().fg(Color::Yellow)
-        } else {
-            Style::new()
-        });
+        .border_style(
+            if state.focus == Focus::TripFile || state.editing_trip_file {
+                Style::new().fg(Color::Yellow)
+            } else {
+                Style::new()
+            },
+        );
 
     let file_text = if state.editing_trip_file {
         vec![
@@ -2239,7 +2506,10 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
         0
     };
 
-    let activity_lines: Vec<Line> = state.modifiers.activities.iter()
+    let activity_lines: Vec<Line> = state
+        .modifiers
+        .activities
+        .iter()
         .enumerate()
         .skip(activity_scroll)
         .take(viewport_height)
@@ -2317,11 +2587,14 @@ fn draw_welcome_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppD
             Line::from(vec![
                 Span::raw("Load "),
                 Span::raw(
-                    state.remembered_trip_file
+                    state
+                        .remembered_trip_file
                         .as_ref()
                         .map(|p| p.display().to_string())
                         .unwrap_or_default(),
-                ).fg(Color::Cyan).bold(),
+                )
+                .fg(Color::Cyan)
+                .bold(),
                 Span::raw("?"),
             ]),
             Line::from(""),
@@ -2341,11 +2614,9 @@ fn draw_main_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &mut App
     let [left_area, right_area] = *Layout::default()
         .direction(Direction::Horizontal)
         .margin(1)
-        .constraints([
-            Constraint::Percentage(50),
-            Constraint::Percentage(50),
-        ])
-        .split(size) else {
+        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+        .split(size)
+    else {
         return;
     };
 
@@ -2371,9 +2642,7 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
     };
 
     let help_text = vec![
-        Line::from(vec![
-            Span::raw("WELCOME SCREEN:").bold().fg(Color::Yellow),
-        ]),
+        Line::from(vec![Span::raw("WELCOME SCREEN:").bold().fg(Color::Yellow)]),
         Line::from(""),
         Line::from(vec![
             Span::raw("Up/Down").bold().fg(Color::Yellow),
@@ -2412,9 +2681,7 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
             Span::raw(" - Continue to main screen"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::raw("CONFIG SCREEN:").bold().fg(Color::Yellow),
-        ]),
+        Line::from(vec![Span::raw("CONFIG SCREEN:").bold().fg(Color::Yellow)]),
         Line::from(""),
         Line::from(vec![
             Span::raw("Tab").bold().fg(Color::Yellow),
@@ -2426,7 +2693,9 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::raw("CONFIG FILE EDITOR (Ctrl+E):").bold().fg(Color::Yellow),
+            Span::raw("CONFIG FILE EDITOR (Ctrl+E):")
+                .bold()
+                .fg(Color::Yellow),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -2490,7 +2759,9 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
         ]),
         Line::from(""),
         Line::from(vec![
-            Span::raw("RIGHT PANEL (Selected Items):").bold().fg(Color::Cyan),
+            Span::raw("RIGHT PANEL (Selected Items):")
+                .bold()
+                .fg(Color::Cyan),
         ]),
         Line::from(""),
         Line::from(vec![
@@ -2506,9 +2777,7 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
             Span::raw(" - Switch to LEFT panel"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::raw("ADD/EDIT POPUP:").bold().fg(Color::Yellow),
-        ]),
+        Line::from(vec![Span::raw("ADD/EDIT POPUP:").bold().fg(Color::Yellow)]),
         Line::from(""),
         Line::from(vec![
             Span::raw("Tab").bold().fg(Color::Yellow),
@@ -2527,9 +2796,7 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
             Span::raw(" - Cancel"),
         ]),
         Line::from(""),
-        Line::from(vec![
-            Span::raw("GENERAL:").bold().fg(Color::Yellow),
-        ]),
+        Line::from(vec![Span::raw("GENERAL:").bold().fg(Color::Yellow)]),
         Line::from(""),
         Line::from(vec![
             Span::raw("?").bold().fg(Color::Yellow),
@@ -2541,8 +2808,7 @@ fn draw_help_screen(f: &mut ratatui::prelude::Frame, size: Rect) {
         ]),
     ];
 
-    let help_para = Paragraph::new(help_text)
-        .wrap(Wrap { trim: true });
+    let help_para = Paragraph::new(help_text).wrap(Wrap { trim: true });
     f.render_widget(help_para, inner);
 }
 
@@ -2555,13 +2821,14 @@ fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDr
             Constraint::Min(8),
             Constraint::Length(3),
         ])
-        .split(size) else {
+        .split(size)
+    else {
         return;
     };
 
     // Title
-    let title = Paragraph::new("Configuration - Modifiers")
-        .style(Style::new().bold().fg(Color::Green));
+    let title =
+        Paragraph::new("Configuration - Modifiers").style(Style::new().bold().fg(Color::Green));
     f.render_widget(title, title_area);
 
     // Modifier editor popup takes precedence
@@ -2575,7 +2842,11 @@ fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDr
         };
 
         let block = Block::default()
-            .title(if editor.index.is_some() { "Edit Modifier" } else { "Add Modifier" })
+            .title(if editor.index.is_some() {
+                "Edit Modifier"
+            } else {
+                "Add Modifier"
+            })
             .borders(Borders::ALL)
             .style(Style::new().bg(Color::Black).fg(Color::White));
         f.render_widget(block, popup_area);
@@ -2590,11 +2861,19 @@ fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDr
         let field_style = Style::new().fg(Color::Yellow).bold();
         let normal_style = Style::new().fg(Color::White);
         let name_line = Line::from(vec![
-            Span::raw("Name: ").style(if editor.field == ModifierField::Name { field_style } else { normal_style }),
+            Span::raw("Name: ").style(if editor.field == ModifierField::Name {
+                field_style
+            } else {
+                normal_style
+            }),
             Span::raw(&editor.name),
         ]);
         let multiplier_line = Line::from(vec![
-            Span::raw("Multiplier: ").style(if editor.field == ModifierField::Multiplier { field_style } else { normal_style }),
+            Span::raw("Multiplier: ").style(if editor.field == ModifierField::Multiplier {
+                field_style
+            } else {
+                normal_style
+            }),
             Span::raw(&editor.multiplier),
         ]);
         let hint = Line::from("Tab switch field | Enter save | Esc cancel".dim());
@@ -2606,33 +2885,48 @@ fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDr
 
     // Section tabs
     let tabs = Line::from(vec![
-        Span::raw(if state.config_section == ConfigSection::TravelStyles { "[Travel Styles]" } else { " Travel Styles " })
-            .style(if state.config_section == ConfigSection::TravelStyles {
-                Style::new().fg(Color::Yellow).bold()
-            } else {
-                Style::new().fg(Color::DarkGray)
-            }),
+        Span::raw(if state.config_section == ConfigSection::TravelStyles {
+            "[Travel Styles]"
+        } else {
+            " Travel Styles "
+        })
+        .style(if state.config_section == ConfigSection::TravelStyles {
+            Style::new().fg(Color::Yellow).bold()
+        } else {
+            Style::new().fg(Color::DarkGray)
+        }),
         Span::raw(" | "),
-        Span::raw(if state.config_section == ConfigSection::Weather { "[Weather]" } else { " Weather " })
-            .style(if state.config_section == ConfigSection::Weather {
-                Style::new().fg(Color::Yellow).bold()
-            } else {
-                Style::new().fg(Color::DarkGray)
-            }),
+        Span::raw(if state.config_section == ConfigSection::Weather {
+            "[Weather]"
+        } else {
+            " Weather "
+        })
+        .style(if state.config_section == ConfigSection::Weather {
+            Style::new().fg(Color::Yellow).bold()
+        } else {
+            Style::new().fg(Color::DarkGray)
+        }),
         Span::raw(" | "),
-        Span::raw(if state.config_section == ConfigSection::Activities { "[Activities]" } else { " Activities " })
-            .style(if state.config_section == ConfigSection::Activities {
-                Style::new().fg(Color::Yellow).bold()
-            } else {
-                Style::new().fg(Color::DarkGray)
-            }),
+        Span::raw(if state.config_section == ConfigSection::Activities {
+            "[Activities]"
+        } else {
+            " Activities "
+        })
+        .style(if state.config_section == ConfigSection::Activities {
+            Style::new().fg(Color::Yellow).bold()
+        } else {
+            Style::new().fg(Color::DarkGray)
+        }),
     ]);
-    f.render_widget(Paragraph::new(tabs), Rect {
-        x: content_area.x,
-        y: content_area.y,
-        width: content_area.width,
-        height: 1,
-    });
+    f.render_widget(
+        Paragraph::new(tabs),
+        Rect {
+            x: content_area.x,
+            y: content_area.y,
+            width: content_area.width,
+            height: 1,
+        },
+    );
 
     // Modifier list of the focused section
     let list_area = Rect {
@@ -2650,14 +2944,17 @@ fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDr
 
     // Window the list so the cursor stays visible
     let viewport_height = list_area.height as usize;
-    let mut scroll = state.config_scroll.min(modifiers.len().saturating_sub(viewport_height));
+    let mut scroll = state
+        .config_scroll
+        .min(modifiers.len().saturating_sub(viewport_height));
     if state.config_cursor >= scroll + viewport_height {
         scroll = state.config_cursor + 1 - viewport_height;
     } else if state.config_cursor < scroll {
         scroll = state.config_cursor;
     }
 
-    let lines: Vec<Line> = modifiers.iter()
+    let lines: Vec<Line> = modifiers
+        .iter()
         .enumerate()
         .skip(scroll)
         .take(viewport_height)
@@ -2679,37 +2976,42 @@ fn draw_config_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &AppDr
         .title(state.config_section.title())
         .borders(Borders::ALL);
     f.render_widget(list_block, list_area);
-    f.render_widget(Paragraph::new(lines), Rect {
-        x: list_area.x + 1,
-        y: list_area.y + 1,
-        width: list_area.width.saturating_sub(2),
-        height: list_area.height.saturating_sub(2),
-    });
+    f.render_widget(
+        Paragraph::new(lines),
+        Rect {
+            x: list_area.x + 1,
+            y: list_area.y + 1,
+            width: list_area.width.saturating_sub(2),
+            height: list_area.height.saturating_sub(2),
+        },
+    );
 
     // Instructions
-    let instructions = Paragraph::new(vec![
-        Line::from(vec![
-            Span::raw("Tab").bold().fg(Color::Yellow),
-            Span::raw(" Switch section | "),
-            Span::raw("↑/↓").bold().fg(Color::Yellow),
-            Span::raw(" Move | "),
-            Span::raw("A").bold().fg(Color::Yellow),
-            Span::raw(" Add | "),
-            Span::raw("E").bold().fg(Color::Yellow),
-            Span::raw(" Edit | "),
-            Span::raw("D").bold().fg(Color::Yellow),
-            Span::raw(" Delete | "),
-            Span::raw("Ctrl+E").bold().fg(Color::Yellow),
-            Span::raw(" Raw editor | "),
-            Span::raw("Esc").bold().fg(Color::Red),
-            Span::raw(" Back"),
-        ]),
-    ])
+    let instructions = Paragraph::new(vec![Line::from(vec![
+        Span::raw("Tab").bold().fg(Color::Yellow),
+        Span::raw(" Switch section | "),
+        Span::raw("↑/↓").bold().fg(Color::Yellow),
+        Span::raw(" Move | "),
+        Span::raw("A").bold().fg(Color::Yellow),
+        Span::raw(" Add | "),
+        Span::raw("E").bold().fg(Color::Yellow),
+        Span::raw(" Edit | "),
+        Span::raw("D").bold().fg(Color::Yellow),
+        Span::raw(" Delete | "),
+        Span::raw("Ctrl+E").bold().fg(Color::Yellow),
+        Span::raw(" Raw editor | "),
+        Span::raw("Esc").bold().fg(Color::Red),
+        Span::raw(" Back"),
+    ])])
     .wrap(Wrap { trim: true });
     f.render_widget(instructions, instructions_area);
 }
 
-fn draw_config_editor_screen(f: &mut ratatui::prelude::Frame, size: Rect, state: &mut AppDrawState) {
+fn draw_config_editor_screen(
+    f: &mut ratatui::prelude::Frame,
+    size: Rect,
+    state: &mut AppDrawState,
+) {
     let [title_area, editor_area, footer_area] = *Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
@@ -2718,7 +3020,8 @@ fn draw_config_editor_screen(f: &mut ratatui::prelude::Frame, size: Rect, state:
             Constraint::Min(5),
             Constraint::Length(2),
         ])
-        .split(size) else {
+        .split(size)
+    else {
         return;
     };
 
@@ -2748,10 +3051,17 @@ fn draw_config_editor_screen(f: &mut ratatui::prelude::Frame, size: Rect, state:
     } else if cursor_line >= scroll + viewport_height {
         scroll = cursor_line + 1 - viewport_height;
     }
-    scroll = scroll.min(state.config_editor_text.len().saturating_sub(viewport_height));
+    scroll = scroll.min(
+        state
+            .config_editor_text
+            .len()
+            .saturating_sub(viewport_height),
+    );
     state.config_editor_scroll = scroll;
 
-    let lines: Vec<Line> = state.config_editor_text.iter()
+    let lines: Vec<Line> = state
+        .config_editor_text
+        .iter()
         .enumerate()
         .skip(scroll)
         .take(viewport_height)
@@ -2812,11 +3122,9 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
     let [title_area, list_area] = *Layout::default()
         .direction(Direction::Vertical)
         .margin(0)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Min(10),
-        ])
-        .split(area) else {
+        .constraints([Constraint::Length(1), Constraint::Min(10)])
+        .split(area)
+    else {
         return;
     };
 
@@ -2833,9 +3141,13 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
     f.render_widget(title, title_area);
 
     // Group items by category
-    let mut categories_map: std::collections::BTreeMap<String, Vec<(usize, &Item)>> = std::collections::BTreeMap::new();
+    let mut categories_map: std::collections::BTreeMap<String, Vec<(usize, &Item)>> =
+        std::collections::BTreeMap::new();
     for (idx, item) in state.packing_list.items.iter().enumerate() {
-        categories_map.entry(item.category.clone()).or_default().push((idx, item));
+        categories_map
+            .entry(item.category.clone())
+            .or_default()
+            .push((idx, item));
     }
 
     // Cursor position within the panel's rows (only when the left side is focused)
@@ -2851,7 +3163,9 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
 
     // Visible window: keep the cursor row in view, otherwise keep the current offset
     let viewport_height = list_area.height as usize;
-    let mut scroll = state.left_scroll.min(total_rows.saturating_sub(viewport_height));
+    let mut scroll = state
+        .left_scroll
+        .min(total_rows.saturating_sub(viewport_height));
     if let Some(cursor) = current_row {
         if cursor < scroll {
             scroll = cursor;
@@ -2874,8 +3188,8 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
             Span::raw(category).bold().fg(Color::Cyan),
         ]);
 
-        let category_para = Paragraph::new(vec![category_line])
-            .block(Block::default().borders(Borders::NONE));
+        let category_para =
+            Paragraph::new(vec![category_line]).block(Block::default().borders(Borders::NONE));
 
         if row_index >= scroll && row_index - scroll < viewport_height {
             let category_area = Rect {
@@ -2888,8 +3202,7 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
 
             if current_row == Some(row_index) {
                 // Highlight the category header the cursor is on
-                let highlight = Block::default()
-                    .style(Style::new().bg(Color::DarkGray));
+                let highlight = Block::default().style(Style::new().bg(Color::DarkGray));
                 f.render_widget(highlight, category_area);
             }
         }
@@ -2913,17 +3226,25 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
 
                 let item_line = Line::from(vec![
                     Span::raw("  "),
-                    Span::raw(selection_symbol).fg(if is_selected { Color::Green } else { Color::Red }),
+                    Span::raw(selection_symbol).fg(if is_selected {
+                        Color::Green
+                    } else {
+                        Color::Red
+                    }),
                     Span::raw(" "),
-                    Span::raw(item_symbol).fg(if item.packed { Color::Green } else { Color::Red }),
+                    Span::raw(item_symbol).fg(if item.packed {
+                        Color::Green
+                    } else {
+                        Color::Red
+                    }),
                     Span::raw(" "),
                     Span::raw(&item.name).style(item_style),
                     Span::raw(" x"),
                     Span::raw(item.quantity.to_string()).bold(),
                 ]);
 
-                let item_para = Paragraph::new(vec![item_line])
-                    .block(Block::default().borders(Borders::NONE));
+                let item_para =
+                    Paragraph::new(vec![item_line]).block(Block::default().borders(Borders::NONE));
 
                 if row_index >= scroll && row_index - scroll < viewport_height {
                     let item_area = Rect {
@@ -2993,7 +3314,11 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
     }
 }
 
-fn draw_selected_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut AppDrawState) {
+fn draw_selected_items_panel(
+    f: &mut ratatui::prelude::Frame,
+    area: Rect,
+    state: &mut AppDrawState,
+) {
     let [title_area, list_area, stats_area] = *Layout::default()
         .direction(Direction::Vertical)
         .margin(0)
@@ -3002,7 +3327,8 @@ fn draw_selected_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state:
             Constraint::Min(10),
             Constraint::Length(5),
         ])
-        .split(area) else {
+        .split(area)
+    else {
         return;
     };
 
@@ -3019,7 +3345,10 @@ fn draw_selected_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state:
     f.render_widget(title, title_area);
 
     // Get only selected items
-    let selected_items: Vec<(usize, &Item)> = state.packing_list.items.iter()
+    let selected_items: Vec<(usize, &Item)> = state
+        .packing_list
+        .items
+        .iter()
         .enumerate()
         .filter(|(_, item)| item.editable)
         .collect();
@@ -3032,9 +3361,13 @@ fn draw_selected_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state:
     };
 
     // Group selected items by category
-    let mut categories_map: std::collections::BTreeMap<String, Vec<(usize, &Item)>> = std::collections::BTreeMap::new();
+    let mut categories_map: std::collections::BTreeMap<String, Vec<(usize, &Item)>> =
+        std::collections::BTreeMap::new();
     for (idx, item) in &selected_items {
-        categories_map.entry(item.category.clone()).or_default().push((*idx, item));
+        categories_map
+            .entry(item.category.clone())
+            .or_default()
+            .push((*idx, item));
     }
 
     // Drawn rows: one header per category plus its items
@@ -3052,13 +3385,17 @@ fn draw_selected_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state:
         let item_order = state.right_item_order();
         let cursor_item = item_order.get(cursor).copied();
         cursor_item.and_then(|item| {
-            drawn_rows.iter().position(|r| matches!(r, PanelRow::Item(i) if *i == item))
+            drawn_rows
+                .iter()
+                .position(|r| matches!(r, PanelRow::Item(i) if *i == item))
         })
     });
 
     // Visible window: keep the cursor row in view, otherwise keep the current offset
     let viewport_height = list_area.height as usize;
-    let mut scroll = state.right_scroll.min(total_rows.saturating_sub(viewport_height));
+    let mut scroll = state
+        .right_scroll
+        .min(total_rows.saturating_sub(viewport_height));
     if let Some(cursor) = cursor_drawn_row {
         if cursor < scroll {
             scroll = cursor;
@@ -3106,15 +3443,19 @@ fn draw_selected_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state:
 
                 let item_line = Line::from(vec![
                     Span::raw("  "),
-                    Span::raw(item_symbol).fg(if item.packed { Color::Green } else { Color::Red }),
+                    Span::raw(item_symbol).fg(if item.packed {
+                        Color::Green
+                    } else {
+                        Color::Red
+                    }),
                     Span::raw(" "),
                     Span::raw(&item.name).style(item_style),
                     Span::raw(" x"),
                     Span::raw(item.quantity.to_string()).bold(),
                 ]);
 
-                let item_para = Paragraph::new(vec![item_line])
-                    .block(Block::default().borders(Borders::NONE));
+                let item_para =
+                    Paragraph::new(vec![item_line]).block(Block::default().borders(Borders::NONE));
 
                 if in_view {
                     let item_area = Rect {
@@ -3144,8 +3485,11 @@ fn draw_selected_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state:
     // Stats
     let total_selected = selected_items.len();
     let total_packing = state.packing_list.items.len();
-    let packed = selected_items.iter().filter(|(_, item)| item.packed).count();
-    
+    let packed = selected_items
+        .iter()
+        .filter(|(_, item)| item.packed)
+        .count();
+
     let stats = Paragraph::new(vec![
         Line::from(vec![
             Span::raw("Total: ").bold(),
@@ -3162,38 +3506,46 @@ fn draw_selected_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state:
         ]),
         Line::from(vec![
             Span::raw("Progress: "),
-            Span::raw(format!("{:.0}%", if total_selected > 0 { (packed as f32 / total_selected as f32 * 100.0) } else { 0.0 })).bold(),
+            Span::raw(format!(
+                "{:.0}%",
+                if total_selected > 0 {
+                    packed as f32 / total_selected as f32 * 100.0
+                } else {
+                    0.0
+                }
+            ))
+            .bold(),
         ]),
     ])
     .block(Block::default().borders(Borders::TOP));
     f.render_widget(stats, stats_area);
 }
 
-fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: InputField, name: &str, category: &str, quantity: &str, category_list: &[String], category_index: usize) {
+fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, fields: &PopupFields) {
     // Create a centered popup with dynamic size
-    let popup_width = (size.width * 60 / 100).min(60).max(40);
+    let popup_width = (size.width * 60 / 100).clamp(40, 60);
     let popup_height = 14;
-    
+
     let popup_area = Rect {
         x: (size.width.saturating_sub(popup_width)) / 2,
         y: (size.height.saturating_sub(popup_height)) / 2,
         width: popup_width,
         height: popup_height.min(size.height),
     };
-    
+
     // Draw background overlay
     let background = Block::default()
         .style(Style::new().bg(Color::Black).fg(Color::White))
         .borders(Borders::NONE);
     f.render_widget(background, size);
-    
+
     // Draw popup
     let popup_block = Block::default()
         .title("Add New Item")
         .borders(Borders::ALL)
         .style(Style::new().bg(Color::Black).fg(Color::White));
     f.render_widget(popup_block, popup_area);
-    
+
     // Popup content
     let content_area = Rect {
         x: popup_area.x + 1,
@@ -3201,10 +3553,10 @@ fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Input
         width: popup_area.width - 2,
         height: popup_area.height - 2,
     };
-    
+
     let field_style = Style::new().fg(Color::Yellow).bold();
     let normal_style = Style::new().fg(Color::White);
-    
+
     // Draw name field
     let name_area = Rect {
         x: content_area.x,
@@ -3213,12 +3565,16 @@ fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Input
         height: 1,
     };
     let name_line = Line::from(vec![
-        Span::raw("Name: ").style(if field == InputField::Name { field_style } else { normal_style }),
-        Span::raw(name),
+        Span::raw("Name: ").style(if fields.field == InputField::Name {
+            field_style
+        } else {
+            normal_style
+        }),
+        Span::raw(fields.name),
     ]);
     let name_para = Paragraph::new(vec![name_line]);
     f.render_widget(name_para, name_area);
-    
+
     // Draw category field
     let category_area = Rect {
         x: content_area.x,
@@ -3226,12 +3582,16 @@ fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Input
         width: content_area.width,
         height: 1,
     };
-    let category_line = Line::from(vec![
-        Span::raw("Category: ").style(if field == InputField::Category { field_style } else { normal_style }),
-    ]);
+    let category_line = Line::from(vec![Span::raw("Category: ").style(
+        if fields.field == InputField::Category {
+            field_style
+        } else {
+            normal_style
+        },
+    )]);
     let category_para = Paragraph::new(vec![category_line]);
     f.render_widget(category_para, category_area);
-    
+
     // Draw category dropdown or selected category
     let dropdown_area = Rect {
         x: content_area.x + 10,
@@ -3239,7 +3599,7 @@ fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Input
         width: content_area.width - 10,
         height: 1,
     };
-    
+
     // Draw quantity field
     let quantity_area = Rect {
         x: content_area.x,
@@ -3248,8 +3608,12 @@ fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Input
         height: 1,
     };
     let quantity_line = Line::from(vec![
-        Span::raw("Quantity: ").style(if field == InputField::Quantity { field_style } else { normal_style }),
-        Span::raw(quantity),
+        Span::raw("Quantity: ").style(if fields.field == InputField::Quantity {
+            field_style
+        } else {
+            normal_style
+        }),
+        Span::raw(fields.quantity),
     ]);
     let quantity_para = Paragraph::new(vec![quantity_line]);
     f.render_widget(quantity_para, quantity_area);
@@ -3268,7 +3632,7 @@ fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Input
         ]),
         Line::from(vec![
             Span::raw("↑/↓").bold().fg(Color::Yellow),
-            Span::raw(" - Select category"),
+            Span::raw(" - Select fields.category"),
         ]),
         Line::from(vec![
             Span::raw("Enter").bold().fg(Color::Yellow),
@@ -3282,9 +3646,10 @@ fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Input
     f.render_widget(instructions, instructions_area);
 
     // Draw category dropdown or selected category (last, so the open dropdown overlays the fields below)
-    if field == InputField::Category {
+    if fields.field == InputField::Category {
         // Draw dropdown list
-        let category_items: Vec<ListItem> = category_list
+        let category_items: Vec<ListItem> = fields
+            .category_list
             .iter()
             .map(|c| ListItem::new(c.as_str()))
             .collect();
@@ -3293,7 +3658,7 @@ fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Input
             .highlight_style(Style::new().fg(Color::Yellow).bold())
             .highlight_symbol("> ");
 
-        let dropdown_height = 5.min(category_list.len() as u16 + 1);
+        let dropdown_height = 5.min(fields.category_list.len() as u16 + 1);
         let dropdown_list_area = Rect {
             x: dropdown_area.x,
             y: dropdown_area.y,
@@ -3302,52 +3667,51 @@ fn draw_add_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Input
         };
         f.render_widget(category_list_widget, dropdown_list_area);
 
-        // Highlight selected category
-        if category_index < category_list.len() {
-            let selected_category = &category_list[category_index];
-            let selected_line = Line::from(vec![
-                Span::raw(selected_category).fg(Color::Yellow).bold(),
-            ]);
+        // Highlight selected fields.category
+        if fields.category_index < fields.category_list.len() {
+            let selected_category = &fields.category_list[fields.category_index];
+            let selected_line =
+                Line::from(vec![Span::raw(selected_category).fg(Color::Yellow).bold()]);
             let selected_para = Paragraph::new(vec![selected_line]);
             f.render_widget(selected_para, dropdown_area);
         }
     } else {
-        // Show selected category text
-        let selected_category = if category_index < category_list.len() {
-            &category_list[category_index]
+        // Show selected fields.category text
+        let selected_category = if fields.category_index < fields.category_list.len() {
+            &fields.category_list[fields.category_index]
         } else {
-            category
+            fields.category
         };
         let category_text = Paragraph::new(vec![Line::from(selected_category)]);
         f.render_widget(category_text, dropdown_area);
     }
 }
 
-fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: InputField, name: &str, category: &str, quantity: &str, category_list: &[String], category_index: usize) {
+fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, fields: &PopupFields) {
     // Create a centered popup with dynamic size
-    let popup_width = (size.width * 60 / 100).min(60).max(40);
+    let popup_width = (size.width * 60 / 100).clamp(40, 60);
     let popup_height = 14;
-    
+
     let popup_area = Rect {
         x: (size.width.saturating_sub(popup_width)) / 2,
         y: (size.height.saturating_sub(popup_height)) / 2,
         width: popup_width,
         height: popup_height.min(size.height),
     };
-    
+
     // Draw background overlay
     let background = Block::default()
         .style(Style::new().bg(Color::Black).fg(Color::White))
         .borders(Borders::NONE);
     f.render_widget(background, size);
-    
+
     // Draw popup
     let popup_block = Block::default()
         .title("Edit Item")
         .borders(Borders::ALL)
         .style(Style::new().bg(Color::Black).fg(Color::White));
     f.render_widget(popup_block, popup_area);
-    
+
     // Popup content
     let content_area = Rect {
         x: popup_area.x + 1,
@@ -3355,10 +3719,10 @@ fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Inpu
         width: popup_area.width - 2,
         height: popup_area.height - 2,
     };
-    
+
     let field_style = Style::new().fg(Color::Yellow).bold();
     let normal_style = Style::new().fg(Color::White);
-    
+
     // Draw name field
     let name_area = Rect {
         x: content_area.x,
@@ -3367,12 +3731,16 @@ fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Inpu
         height: 1,
     };
     let name_line = Line::from(vec![
-        Span::raw("Name: ").style(if field == InputField::Name { field_style } else { normal_style }),
-        Span::raw(name),
+        Span::raw("Name: ").style(if fields.field == InputField::Name {
+            field_style
+        } else {
+            normal_style
+        }),
+        Span::raw(fields.name),
     ]);
     let name_para = Paragraph::new(vec![name_line]);
     f.render_widget(name_para, name_area);
-    
+
     // Draw category field
     let category_area = Rect {
         x: content_area.x,
@@ -3380,12 +3748,16 @@ fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Inpu
         width: content_area.width,
         height: 1,
     };
-    let category_line = Line::from(vec![
-        Span::raw("Category: ").style(if field == InputField::Category { field_style } else { normal_style }),
-    ]);
+    let category_line = Line::from(vec![Span::raw("Category: ").style(
+        if fields.field == InputField::Category {
+            field_style
+        } else {
+            normal_style
+        },
+    )]);
     let category_para = Paragraph::new(vec![category_line]);
     f.render_widget(category_para, category_area);
-    
+
     // Draw category dropdown or selected category
     let dropdown_area = Rect {
         x: content_area.x + 10,
@@ -3402,8 +3774,12 @@ fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Inpu
         height: 1,
     };
     let quantity_line = Line::from(vec![
-        Span::raw("Quantity: ").style(if field == InputField::Quantity { field_style } else { normal_style }),
-        Span::raw(quantity),
+        Span::raw("Quantity: ").style(if fields.field == InputField::Quantity {
+            field_style
+        } else {
+            normal_style
+        }),
+        Span::raw(fields.quantity),
     ]);
     let quantity_para = Paragraph::new(vec![quantity_line]);
     f.render_widget(quantity_para, quantity_area);
@@ -3422,7 +3798,7 @@ fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Inpu
         ]),
         Line::from(vec![
             Span::raw("↑/↓").bold().fg(Color::Yellow),
-            Span::raw(" - Select category"),
+            Span::raw(" - Select fields.category"),
         ]),
         Line::from(vec![
             Span::raw("Enter").bold().fg(Color::Yellow),
@@ -3436,9 +3812,10 @@ fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Inpu
     f.render_widget(instructions, instructions_area);
 
     // Draw category dropdown or selected category (last, so the open dropdown overlays the fields below)
-    if field == InputField::Category {
+    if fields.field == InputField::Category {
         // Draw dropdown list
-        let category_items: Vec<ListItem> = category_list
+        let category_items: Vec<ListItem> = fields
+            .category_list
             .iter()
             .map(|c| ListItem::new(c.as_str()))
             .collect();
@@ -3447,7 +3824,7 @@ fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Inpu
             .highlight_style(Style::new().fg(Color::Yellow).bold())
             .highlight_symbol("> ");
 
-        let dropdown_height = 5.min(category_list.len() as u16 + 1);
+        let dropdown_height = 5.min(fields.category_list.len() as u16 + 1);
         let dropdown_list_area = Rect {
             x: dropdown_area.x,
             y: dropdown_area.y,
@@ -3456,52 +3833,56 @@ fn draw_edit_item_popup(f: &mut ratatui::prelude::Frame, size: Rect, field: Inpu
         };
         f.render_widget(category_list_widget, dropdown_list_area);
 
-        // Highlight selected category
-        if category_index < category_list.len() {
-            let selected_category = &category_list[category_index];
-            let selected_line = Line::from(vec![
-                Span::raw(selected_category).fg(Color::Yellow).bold(),
-            ]);
+        // Highlight selected fields.category
+        if fields.category_index < fields.category_list.len() {
+            let selected_category = &fields.category_list[fields.category_index];
+            let selected_line =
+                Line::from(vec![Span::raw(selected_category).fg(Color::Yellow).bold()]);
             let selected_para = Paragraph::new(vec![selected_line]);
             f.render_widget(selected_para, dropdown_area);
         }
     } else {
-        // Show selected category text
-        let selected_category = if category_index < category_list.len() {
-            &category_list[category_index]
+        // Show selected fields.category text
+        let selected_category = if fields.category_index < fields.category_list.len() {
+            &fields.category_list[fields.category_index]
         } else {
-            category
+            fields.category
         };
         let category_text = Paragraph::new(vec![Line::from(selected_category)]);
         f.render_widget(category_text, dropdown_area);
     }
 }
 
-fn draw_confirm_delete_popup(f: &mut ratatui::prelude::Frame, size: Rect, index: usize, packing_list: &PackingList) {
+fn draw_confirm_delete_popup(
+    f: &mut ratatui::prelude::Frame,
+    size: Rect,
+    index: usize,
+    packing_list: &PackingList,
+) {
     // Create a centered popup with dynamic size
-    let popup_width = (size.width * 40 / 100).min(40).max(30);
+    let popup_width = (size.width * 40 / 100).clamp(30, 40);
     let popup_height = 8;
-    
+
     let popup_area = Rect {
         x: (size.width.saturating_sub(popup_width)) / 2,
         y: (size.height.saturating_sub(popup_height)) / 2,
         width: popup_width,
         height: popup_height.min(size.height),
     };
-    
+
     // Draw background overlay
     let background = Block::default()
         .style(Style::new().bg(Color::Black).fg(Color::White))
         .borders(Borders::NONE);
     f.render_widget(background, size);
-    
+
     // Draw popup
     let popup_block = Block::default()
         .title("Confirm Delete")
         .borders(Borders::ALL)
         .style(Style::new().bg(Color::Black).fg(Color::White));
     f.render_widget(popup_block, popup_area);
-    
+
     // Popup content
     let content_area = Rect {
         x: popup_area.x + 1,
@@ -3509,13 +3890,13 @@ fn draw_confirm_delete_popup(f: &mut ratatui::prelude::Frame, size: Rect, index:
         width: popup_area.width - 2,
         height: popup_area.height - 2,
     };
-    
+
     let item_name = if index < packing_list.items.len() {
         &packing_list.items[index].name
     } else {
         "Unknown"
     };
-    
+
     let lines = vec![
         Line::from(""),
         Line::from(vec![
@@ -3533,7 +3914,7 @@ fn draw_confirm_delete_popup(f: &mut ratatui::prelude::Frame, size: Rect, index:
             Span::raw(" - Cancel"),
         ]),
     ];
-    
+
     let content = Paragraph::new(lines);
     f.render_widget(content, content_area);
 }

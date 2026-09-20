@@ -33,15 +33,24 @@ impl Default for ModifiersConfig {
 
 impl ModifiersConfig {
     pub fn travel_style_multiplier(&self, name: &str) -> Option<f32> {
-        self.travel_styles.iter().find(|m| m.name == name).map(|m| m.multiplier)
+        self.travel_styles
+            .iter()
+            .find(|m| m.name == name)
+            .map(|m| m.multiplier)
     }
 
     pub fn weather_multiplier(&self, name: &str) -> Option<f32> {
-        self.weather.iter().find(|m| m.name == name).map(|m| m.multiplier)
+        self.weather
+            .iter()
+            .find(|m| m.name == name)
+            .map(|m| m.multiplier)
     }
 
     pub fn activity_multiplier(&self, name: &str) -> Option<f32> {
-        self.activities.iter().find(|m| m.name == name).map(|m| m.multiplier)
+        self.activities
+            .iter()
+            .find(|m| m.name == name)
+            .map(|m| m.multiplier)
     }
 }
 

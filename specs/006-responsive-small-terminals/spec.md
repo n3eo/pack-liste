@@ -8,6 +8,17 @@
 
 **Input**: User description: "Make the UI more responsive and work better with smaller terminal sizes"
 
+Refined 2026-09-20 with:
+"show the navigation explanation on the list screen or for small sizes hide behind '?' shortcut"
+
+> **Refinement note**: The main list screen currently shows its navigation
+> explanation (key hints) only when there is spare vertical space, and
+> silently drops it otherwise. The refinement makes this a defined
+> behavior: the hints are shown on the list screen when space allows, and
+> when the terminal is too small they collapse to a single short hint
+> pointing at the existing `?` help shortcut, so the explanation is always
+> reachable but never breaks the layout.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Main packing screen stays usable at reduced sizes (Priority: P1)
@@ -72,6 +83,21 @@ A user shrinks the terminal below the smallest usable size (or resizes it while 
 2. **Given** a terminal below the minimum usable size, **When** the user views the application, **Then** a readable notice appears instead of broken content, and no data is lost.
 3. **Given** the terminal returns to a usable size, **When** the notice was showing, **Then** the previous screen reappears with its state intact.
 
+### User Story 5 - Navigation hints adapt to the available space (Priority: P2)
+
+A user works on the main list screen. The navigation explanation (which keys do what) is shown on the screen when there is room for it. When the terminal is too small to show the full explanation without squeezing the lists, the explanation is replaced by a single short hint that points to the existing help shortcut (`?`), which opens the full navigation explanation on demand. The user never loses access to the explanation, and the lists never lose space to it at small sizes.
+
+**Why this priority**: The hints teach the key-driven interface; hiding them entirely at small sizes leaves a user stranded with no visible clue. A one-line pointer to the help screen keeps the explanation reachable at every size at minimal cost.
+
+**Independent Test**: Open the main screen at a large size and verify the navigation explanation is visible; shrink the terminal and verify the explanation collapses to the short `?` hint while the lists keep their space; press `?` and verify the full explanation opens.
+
+**Acceptance Scenarios**:
+
+1. **Given** the main screen in a terminal with ample space, **When** the list is rendered, **Then** the navigation explanation is shown on the screen.
+2. **Given** the main screen in a terminal too small for the full explanation, **When** the list is rendered, **Then** only the short hint (pointing to `?` for help) is shown, and the lists keep the space the full explanation would have taken.
+3. **Given** the main screen at any size, **When** the user presses `?`, **Then** the full navigation explanation opens as the help screen, and closing it returns to the list screen unchanged.
+4. **Given** the terminal is resized from small to large (or back) while on the main screen, **When** the next frame renders, **Then** the explanation switches between full and short form to match the new size.
+
 ### Edge Cases
 
 - What happens when the terminal is resized while a popup is open or text is being typed?
@@ -79,6 +105,8 @@ A user shrinks the terminal below the smallest usable size (or resizes it while 
 - How are very long item names, category names, and file paths displayed at narrow widths?
 - What happens to the cursor and scroll position when a list is deep-scrolled and the terminal shrinks (fewer visible rows)?
 - What happens when the terminal grows during the "too small" notice — is state fully restored?
+- At which size exactly does the navigation explanation switch to the short `?` hint, and is the switch stable (no flicker when the terminal sits exactly at the threshold)?
+- Is the short hint shown when the list content itself needs all the rows (deep list in a mid-size terminal), or only when the terminal is small?
 
 ## Requirements *(mandatory)*
 
@@ -92,6 +120,9 @@ A user shrinks the terminal below the smallest usable size (or resizes it while 
 - **FR-006**: Long text values (item names, categories, file paths) MUST be displayed at narrow widths without breaking the layout, using truncation with a visible indicator or safe wrapping.
 - **FR-007**: All keyboard functions MUST remain available at small sizes with the same key bindings as at large sizes.
 - **FR-008**: The application MUST remain fully usable down to 80 columns by 24 rows; below that size, only the readable notice and data safety requirements (FR-005) apply.
+- **FR-009**: The main list screen MUST show the navigation explanation when the terminal has room for it without squeezing the lists.
+- **FR-010**: When the terminal is too small for the full navigation explanation, the main list screen MUST show a single short hint pointing to the `?` help shortcut instead, and MUST NOT let the explanation or hint crowd out the lists.
+- **FR-011**: The `?` shortcut MUST open the full navigation explanation (help screen) from the main list screen at every supported size, and closing it MUST return to the list screen with its state unchanged.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -107,6 +138,8 @@ A user shrinks the terminal below the smallest usable size (or resizes it while 
 - **SC-003**: Terminal resizes take effect on screen within 1 second, without restart or data loss.
 - **SC-004**: 100% of keyboard functions available at large sizes remain available at the minimum size.
 - **SC-005**: Below the minimum size, 100% of sessions show the readable notice (never broken content), and no session loses data.
+- **SC-006**: At every supported size, the navigation explanation is reachable within one key press (`?`) from the main list screen.
+- **SC-007**: At small sizes, the short hint replaces the full explanation without reducing the number of visible list rows below what the layout mode provides.
 
 ## Assumptions
 
@@ -116,3 +149,5 @@ A user shrinks the terminal below the smallest usable size (or resizes it while 
 - Terminals below 80x24 are out of scope for full usability; only the clear notice and data safety apply there.
 - Adaptation is automatic; no user-facing settings are added for layout.
 - The application is already usable at large sizes; this feature only concerns reduced sizes and resizing.
+- The `?` help shortcut already exists on the main and welcome screens; this feature relies on it rather than adding a new screen or command.
+- The full navigation explanation is the help screen's content; the on-list hints are a condensed form of it, and the short hint is a pointer to that screen.

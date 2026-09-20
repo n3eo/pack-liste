@@ -5,7 +5,6 @@ mod app;
 mod config;
 mod models;
 mod quantity;
-mod services;
 mod ui;
 
 #[derive(Parser, Debug)]

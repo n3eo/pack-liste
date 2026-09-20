@@ -47,14 +47,13 @@ impl TripFile {
 
     /// Save the trip file in place.
     pub fn save(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-            }
+        if let Some(parent) = path.parent()
+            && !parent.as_os_str().is_empty()
+        {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
         }
-        let yaml = serde_yaml::to_string(self)
-            .context("Failed to serialize trip file")?;
+        let yaml = serde_yaml::to_string(self).context("Failed to serialize trip file")?;
         fs::write(path, yaml)
             .with_context(|| format!("Failed to write trip file {}", path.display()))?;
         Ok(())
@@ -70,15 +69,19 @@ impl TripFile {
         let find_config_category = |name: &str, category: &str| -> Option<String> {
             // Prefer an exact match on both name and category, fall back
             // to a name-only match
-            config_items.iter()
+            config_items
+                .iter()
                 .find(|(n, c)| n.eq_ignore_ascii_case(name) && c.eq_ignore_ascii_case(category))
-                .or_else(|| config_items.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)))
+                .or_else(|| {
+                    config_items
+                        .iter()
+                        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+                })
                 .map(|(_, c)| c.clone())
         };
 
-        self.items.retain(|item| {
-            find_config_category(&item.name, &item.category).is_some()
-        });
+        self.items
+            .retain(|item| find_config_category(&item.name, &item.category).is_some());
 
         for item in &mut self.items {
             if let Some(category) = find_config_category(&item.name, &item.category) {

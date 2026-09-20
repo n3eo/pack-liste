@@ -32,4 +32,5 @@
 ## Notes
 
 - Both clarification questions were resolved by the user on 2026-09-20: Q1 = vertical stacked arrangement for the main screen below the side-by-side threshold; Q2 = 80x24 as the minimum fully supported size. The decisions are encoded in User Story 1, FR-002, FR-008, SC-002, and the Assumptions section.
+- Refined 2026-09-20 with the navigation-hints request: added User Story 5 (hints shown on the list screen when space allows, collapsing to a short `?` hint at small sizes), FR-009/FR-010/FR-011, SC-006/SC-007, two new edge cases (threshold stability, deep-list interaction), and matching assumptions. The refinement reuses the existing `?` help screen rather than adding a new surface.
 - All checklist items pass. The spec is ready for `/speckit-clarify` or `/speckit-plan`.
