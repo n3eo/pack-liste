@@ -63,3 +63,16 @@ impl Item {
         self.categories.iter().any(|c| c == category)
     }
 }
+
+/// Split a category string into its two display layers (spec 024):
+/// the top layer (before the FIRST ": ") and the sub-category
+/// (everything after it, verbatim — it may itself contain ": ").
+/// A category without the separator has no sub-category: the whole
+/// string is the top layer. Pure — the input is never rewritten; the
+/// stored string remains the item's identity.
+pub(crate) fn category_layers(category: &str) -> (&str, Option<&str>) {
+    match category.split_once(": ") {
+        Some((top, sub)) => (top, Some(sub)),
+        None => (category, None),
+    }
+}

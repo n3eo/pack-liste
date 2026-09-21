@@ -10,7 +10,7 @@ use std::io::{self, stdout};
 use std::path::PathBuf;
 
 use crate::config::trip_file::{TripFile, TripItem};
-use crate::models::item::QuantityBuffer;
+use crate::models::item::{QuantityBuffer, category_layers};
 use crate::models::weekdays::Weekdays;
 use crate::quantity::calculation::QuantityCalculation;
 use crate::ui::config_io::{
@@ -142,6 +142,7 @@ impl App {
             modifiers: trip_params.modifiers,
             focus: Focus::TripFile,
             collapsed_categories: Vec::new(),
+            collapsed_groups: Vec::new(),
             selected_index: 0,
             focus_side: FocusSide::Left,
             fullscreen: false,
@@ -531,18 +532,19 @@ impl App {
             let scope = if key.modifiers.contains(M::SHIFT) {
                 RecalculateScope::All
             } else {
-                // The cursor's item's category; on a header, the
-                // header's own category (EC-001)
-                match self.current_item_index() {
-                    Some(idx) => RecalculateScope::Category(
+                // The cursor's category-level scope (EC-001): the
+                // item's sub-category, the header's sub-category, or
+                // the whole group on a group header (spec 024)
+                match self.draw_state.cursor_recalc_scope() {
+                    Some(RecalculateScope::Item(idx)) => RecalculateScope::Category(
                         self.draw_state.packing_list.items[idx]
                             .primary_category()
                             .to_string(),
                     ),
-                    None => match self.current_category() {
-                        Some(c) => RecalculateScope::Category(c),
-                        None => return Ok(false),
-                    },
+                    Some(scope @ (RecalculateScope::Category(_) | RecalculateScope::Group(_))) => {
+                        scope
+                    }
+                    _ => return Ok(false),
                 }
             };
             self.recalculate_current_scope(scope)?;
@@ -687,8 +689,10 @@ impl App {
         let category = self.draw_state.packing_list.items[item_index]
             .primary_category()
             .to_string();
+        let (group, _) = category_layers(&category);
 
-        // Collapse everything, then expand only the cursor's category
+        // Collapse everything, then expand only the cursor item's
+        // sub-category AND its group (spec 024)
         let all_categories: Vec<String> = self
             .draw_state
             .packing_list
@@ -702,6 +706,18 @@ impl App {
         self.draw_state
             .collapsed_categories
             .retain(|c| c != &category);
+        let all_groups: Vec<String> = self
+            .draw_state
+            .packing_list
+            .items
+            .iter()
+            .flat_map(|item| item.categories.iter().cloned())
+            .map(|c| category_layers(&c).0.to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        self.draw_state.collapsed_groups = all_groups;
+        self.draw_state.collapsed_groups.retain(|g| g != group);
     }
 }
 

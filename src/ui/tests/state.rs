@@ -95,9 +95,10 @@ fn packed_toggles_only_on_right_side() {
     state.selected_index = 1;
     state.toggle_item_packed();
     assert!(!state.packing_list.items[0].packed);
-    // On the right side the rows are the selected items only: one row
+    // On the right side the rows are the tree (spec 024): the group
+    // header at row 0, the item beneath it at row 1
     state.focus_side = FocusSide::Right;
-    state.selected_index = 0;
+    state.selected_index = 1;
     state.toggle_item_packed();
     assert!(state.packing_list.items[0].packed);
     state.toggle_item_packed();
@@ -110,7 +111,9 @@ fn collapse_moves_cursor_to_header() {
     state.selected_index = 2; // cursor on item B
     state.toggle_category_collapse();
     assert!(state.collapsed_categories.contains(&"Cat".to_string()));
-    // Cursor moved to the category header (row 0)
+    // Cursor moved to the group header (row 0 — "Cat" is
+    // separator-free, so it renders as a group with items directly
+    // beneath, spec 024)
     assert_eq!(state.selected_index, 0);
     // Expanding keeps the cursor on the header
     state.toggle_category_collapse();
@@ -276,11 +279,14 @@ fn multi_category_item_appears_under_each_category() {
     let mut item_count = 0;
     for (i, row) in rows.iter().enumerate() {
         match row {
-            PanelRow::Category(c) => {
-                if c == "Cat" || c == "Gear" {
+            // "Cat" and "Gear" are separator-free: they render as
+            // group headers (spec 024, FR-003)
+            PanelRow::Group(g) => {
+                if g == "Cat" || g == "Gear" {
                     cat_positions.push(i);
                 }
             }
+            PanelRow::Category(_) => {}
             PanelRow::Item(idx) => {
                 if state.packing_list.items[*idx].name == "A" {
                     item_count += 1;
@@ -304,14 +310,28 @@ fn multi_category_selection_is_shared() {
     state.toggle_item_selection();
     assert!(!state.packing_list.items[0].selected);
     // The compiled list shows the item at most once (primary category)
-    let right = state.right_item_order();
+    let right: Vec<usize> = state
+        .right_rows()
+        .iter()
+        .filter_map(|r| match r {
+            PanelRow::Item(i) => Some(*i),
+            _ => None,
+        })
+        .collect();
     assert_eq!(right.len(), 0, "deselected item gone from compiled list");
     // Reselect through the Gear occurrence
     state.selected_index = 2; // Gear header is row 2, item row 3
     state.selected_index = 3;
     state.toggle_item_selection();
     assert!(state.packing_list.items[0].selected);
-    let right = state.right_item_order();
+    let right: Vec<usize> = state
+        .right_rows()
+        .iter()
+        .filter_map(|r| match r {
+            PanelRow::Item(i) => Some(*i),
+            _ => None,
+        })
+        .collect();
     assert_eq!(right.len(), 1, "item appears once in compiled list");
 }
 
@@ -972,7 +992,7 @@ fn row_text_truncates_with_visible_indicator() {
 fn hint_collapse_switches_on_the_height_budget() {
     use crate::ui::hints::HintSurface;
     use crate::ui::hints::{collapsed_hint_line, hint_entries, hint_rows, hint_rows_fit_budget};
-    let entries = hint_entries(HintSurface::LeftPanel);
+    let entries = hint_entries(HintSurface::MainScreen);
     // Wide terminal: the packed rows fit the budget — full hints
     let wide_rows = hint_rows(entries, 120);
     assert!(hint_rows_fit_budget(entries, 120, 3));
@@ -992,4 +1012,325 @@ fn hint_collapse_switches_on_the_height_budget() {
         assert!(hint_rows_fit_budget(entries, 120, 3));
         assert!(!hint_rows_fit_budget(entries, 30, 3));
     }
+}
+
+// ---- Sticky category headers on scroll ----
+
+#[test]
+fn sticky_rows_pin_the_orphaned_category_header() {
+    use crate::ui::state::sticky_rows;
+    // Rows: [Cat A, a1, a2, Cat B, b1, b2]
+    let rows = vec![
+        PanelRow::Category("A".to_string()),
+        PanelRow::Item(0),
+        PanelRow::Item(1),
+        PanelRow::Category("B".to_string()),
+        PanelRow::Item(2),
+        PanelRow::Item(3),
+    ];
+    // Scroll 0: the plain window, unchanged
+    let visible = sticky_rows(&rows, 0, 3);
+    assert_eq!(visible.len(), 3);
+    assert!(matches!(visible[0].1, PanelRow::Category(_)));
+    // Scroll 1 (starts mid-A): the header is pinned to the top
+    let visible = sticky_rows(&rows, 1, 3);
+    assert!(matches!(&visible[0].1, PanelRow::Category(c) if c == "A"));
+    assert!(matches!(visible[1].1, PanelRow::Item(0)));
+    assert!(matches!(visible[2].1, PanelRow::Item(1)));
+    // The pinned header keeps its original position (0)
+    assert_eq!(visible[0].0, 0);
+    // Scroll 4 (starts on b1, mid-B): B's header is pinned
+    let visible = sticky_rows(&rows, 4, 2);
+    assert!(matches!(&visible[0].1, PanelRow::Category(c) if c == "B"));
+    assert!(matches!(visible[1].1, PanelRow::Item(2)));
+    assert_eq!(visible[0].0, 3);
+    // Scroll onto a header row: no pinning needed
+    let visible = sticky_rows(&rows, 3, 2);
+    assert!(matches!(&visible[0].1, PanelRow::Category(c) if c == "B"));
+    assert!(matches!(visible[1].1, PanelRow::Item(2)));
+}
+
+#[test]
+fn sticky_rows_never_exceed_the_viewport() {
+    use crate::ui::state::sticky_rows;
+    let rows = vec![
+        PanelRow::Category("A".to_string()),
+        PanelRow::Item(0),
+        PanelRow::Item(1),
+    ];
+    // Viewport 2, scroll 1: pinned header + one item = 2 rows
+    let visible = sticky_rows(&rows, 1, 2);
+    assert_eq!(visible.len(), 2);
+    // Viewport 1, scroll 1: the pin replaces the single row
+    let visible = sticky_rows(&rows, 1, 1);
+    assert_eq!(visible.len(), 1);
+    assert!(matches!(visible[0].1, PanelRow::Category(_)));
+}
+
+// ---- Spec 024: the two-layer category nesting ----
+
+#[test]
+fn category_split_uses_the_first_separator() {
+    use crate::models::item::category_layers;
+    // The user's example: group + sub-category
+    assert_eq!(
+        category_layers("Ausland: Karten"),
+        ("Ausland", Some("Karten"))
+    );
+    // Only the FIRST separator splits; the rest stays verbatim
+    assert_eq!(category_layers("A: B: C"), ("A", Some("B: C")));
+    // Separator-free: the whole string is the top layer, no sub-layer
+    assert_eq!(category_layers("OhneTrenner"), ("OhneTrenner", None));
+    // A group with a single same-named sub-category
+    assert_eq!(
+        category_layers("Kulturbeutel: Kulturbeutel"),
+        ("Kulturbeutel", Some("Kulturbeutel"))
+    );
+    // The input is never rewritten (borrowed, verbatim)
+    let original = "Ausland: Karten".to_string();
+    let (top, sub) = category_layers(&original);
+    assert_eq!(top, "Ausland");
+    assert_eq!(sub, Some("Karten"));
+    assert_eq!(original, "Ausland: Karten");
+}
+
+#[test]
+fn two_layer_rows_group_shared_top_layers() {
+    // Categories sharing a top layer produce ONE group row followed
+    // by their sub-category rows (the user's example)
+    let mut a = test_item("Führerschein", "Ausland: Karten");
+    a.categories = vec!["Ausland: Karten".to_string()];
+    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
+    b.categories = vec!["Ausland: Handgepäck".to_string()];
+    let state = test_state(vec![a, b]);
+    let rows = state.left_rows();
+    // Expected (sorted): Group(Ausland), Category(Ausland: Handgepäck),
+    // item, Category(Ausland: Karten), item
+    let kinds: Vec<&PanelRow> = rows.iter().collect();
+    assert!(
+        matches!(&kinds[0], PanelRow::Group(g) if g == "Ausland"),
+        "one shared group header"
+    );
+    assert!(matches!(&kinds[1], PanelRow::Category(c) if c == "Ausland: Handgepäck"));
+    assert!(matches!(kinds[2], PanelRow::Item(1)));
+    assert!(matches!(&kinds[3], PanelRow::Category(c) if c == "Ausland: Karten"));
+    assert!(matches!(kinds[4], PanelRow::Item(0)));
+    // Exactly one group row for the two categories
+    let group_count = rows
+        .iter()
+        .filter(|r| matches!(r, PanelRow::Group(g) if g == "Ausland"))
+        .count();
+    assert_eq!(group_count, 1);
+}
+
+#[test]
+fn two_layer_rows_separator_free_categories_have_no_sub_row() {
+    // A separator-free category renders as a group with its items
+    // directly beneath (FR-003)
+    let state = test_state(vec![test_item("A", "Cat"), test_item("B", "Cat")]);
+    let rows = state.left_rows();
+    assert!(matches!(&rows[0], PanelRow::Group(g) if g == "Cat"));
+    // No Category row: the items sit directly beneath the group
+    assert!(matches!(rows[1], PanelRow::Item(0)));
+    assert!(matches!(rows[2], PanelRow::Item(1)));
+    assert!(!rows.iter().any(|r| matches!(r, PanelRow::Category(_))));
+}
+
+#[test]
+fn group_collapse_hides_the_whole_sub_tree() {
+    // Collapsing a group hides its sub-categories and items; the
+    // cursor stays on the group header (FR-005)
+    let mut a = test_item("Führerschein", "Ausland: Karten");
+    a.categories = vec!["Ausland: Karten".to_string()];
+    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
+    b.categories = vec!["Ausland: Handgepäck".to_string()];
+    let mut state = test_state(vec![a, b]);
+    // Cursor on the group header (row 0)
+    state.selected_index = 0;
+    state.toggle_category_collapse();
+    assert!(state.collapsed_groups.contains(&"Ausland".to_string()));
+    // Only the group row remains for the whole group
+    let rows = state.left_rows();
+    assert_eq!(rows.len(), 1);
+    assert!(matches!(&rows[0], PanelRow::Group(g) if g == "Ausland"));
+    assert_eq!(state.selected_index, 0);
+    // Expanding restores the tree
+    state.toggle_category_collapse();
+    assert!(!state.collapsed_groups.contains(&"Ausland".to_string()));
+    assert_eq!(state.left_rows().len(), 5);
+}
+
+#[test]
+fn sub_category_collapse_hides_only_its_items() {
+    // Collapsing a sub-category hides its items only; the sibling
+    // sub-category and the group header remain (FR-005)
+    let mut a = test_item("Führerschein", "Ausland: Karten");
+    a.categories = vec!["Ausland: Karten".to_string()];
+    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
+    b.categories = vec!["Ausland: Handgepäck".to_string()];
+    let mut state = test_state(vec![a, b]);
+    // Cursor on the Karten sub-category header (row 3 in sorted
+    // order: Group, Handgepäck, item, Karten)
+    state.selected_index = 3;
+    state.toggle_category_collapse();
+    assert!(
+        state
+            .collapsed_categories
+            .contains(&"Ausland: Karten".to_string())
+    );
+    let rows = state.left_rows();
+    // Group + Handgepäck header + item + Karten header (no items)
+    assert_eq!(rows.len(), 4);
+    assert!(matches!(&rows[1], PanelRow::Category(c) if c == "Ausland: Handgepäck"));
+    assert!(matches!(&rows[3], PanelRow::Category(c) if c == "Ausland: Karten"));
+    // The cursor stays on the collapsed header
+    assert_eq!(state.selected_index, 3);
+}
+
+#[test]
+fn group_selection_flips_every_item_under_the_group() {
+    // Ctrl+Space on a group header selects/deselects every item whose
+    // any category's top layer matches (FR-006)
+    let mut a = test_item("Führerschein", "Ausland: Karten");
+    a.categories = vec!["Ausland: Karten".to_string()];
+    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
+    b.categories = vec!["Ausland: Handgepäck".to_string()];
+    let other = test_item("Pass", "Dokumente_Karte: Dokumente/Karten");
+    let mut state = test_state(vec![a, b, other]);
+    // Cursor on the Ausland group header (row 0)
+    state.selected_index = 0;
+    state.toggle_category_selection();
+    // Both Ausland items deselected; the other group untouched
+    assert!(!state.packing_list.items[0].selected);
+    assert!(!state.packing_list.items[1].selected);
+    assert!(state.packing_list.items[2].selected);
+    // Toggling back reselects
+    state.toggle_category_selection();
+    assert!(state.packing_list.items[0].selected);
+    assert!(state.packing_list.items[1].selected);
+}
+
+#[test]
+fn group_recalc_scope_covers_the_group_only() {
+    // The group recalculate scope covers every item under the group
+    // and nothing else (FR-010)
+    let mut a = test_item("Führerschein", "Ausland: Karten");
+    a.categories = vec!["Ausland: Karten".to_string()];
+    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
+    b.categories = vec!["Ausland: Handgepäck".to_string()];
+    let other = test_item("Pass", "Dokumente_Karte: Dokumente/Karten");
+    let mut state = test_state(vec![a, b, other]);
+    // Stale values everywhere
+    for item in &mut state.packing_list.items {
+        item.quantity = 99;
+    }
+    state
+        .recalculate_quantities_scoped(
+            &QuantityCalculation::new(),
+            RecalculateScope::Group("Ausland".to_string()),
+        )
+        .unwrap();
+    // Both Ausland items recalculated (7 days x 1.0 x 1.0); the
+    // other group untouched
+    assert_eq!(state.packing_list.items[0].quantity, 7);
+    assert_eq!(state.packing_list.items[1].quantity, 7);
+    assert_eq!(state.packing_list.items[2].quantity, 99);
+}
+
+#[test]
+fn cursor_recalc_scope_resolves_by_row() {
+    // The cursor's recalculate scope follows the row: Group → the
+    // group, Category → the sub-category, Item → the item
+    let mut a = test_item("Führerschein", "Ausland: Karten");
+    a.categories = vec!["Ausland: Karten".to_string()];
+    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
+    b.categories = vec!["Ausland: Handgepäck".to_string()];
+    let state = test_state(vec![a, b]);
+    // Row 0: the group header
+    assert_eq!(
+        state.cursor_recalc_scope(),
+        Some(RecalculateScope::Group("Ausland".to_string()))
+    );
+    // Row 1: the Handgepäck sub-category header (sorted first)
+    let mut s = state.clone();
+    s.selected_index = 1;
+    assert_eq!(
+        s.cursor_recalc_scope(),
+        Some(RecalculateScope::Category(
+            "Ausland: Handgepäck".to_string()
+        ))
+    );
+    // Row 2: the Handgepäck item
+    let mut s = state.clone();
+    s.selected_index = 2;
+    assert_eq!(s.cursor_recalc_scope(), Some(RecalculateScope::Item(1)));
+}
+
+#[test]
+fn sticky_rows_pin_the_group_when_it_scrolls_off() {
+    use crate::ui::state::sticky_rows;
+    // A window starting on a sub-category header whose group header
+    // is off-screen pins the group header (FR-009)
+    let rows = vec![
+        PanelRow::Group("Ausland".to_string()),
+        PanelRow::Category("Ausland: Karten".to_string()),
+        PanelRow::Item(0),
+        PanelRow::Item(1),
+        PanelRow::Category("Ausland: Handgepäck".to_string()),
+        PanelRow::Item(2),
+    ];
+    // Scroll 4 (starts on the Handgepäck header): the group is
+    // off-screen above → pinned
+    let visible = sticky_rows(&rows, 4, 2);
+    assert!(matches!(&visible[0].1, PanelRow::Group(g) if g == "Ausland"));
+    assert!(matches!(&visible[1].1, PanelRow::Category(c) if c == "Ausland: Handgepäck"));
+    assert_eq!(visible[0].0, 0);
+    // Scroll 2 (starts on an item): the nearest off-screen header is
+    // the Karten sub-category → pinned
+    let visible = sticky_rows(&rows, 2, 2);
+    assert!(matches!(&visible[0].1, PanelRow::Category(c) if c == "Ausland: Karten"));
+    assert!(matches!(visible[1].1, PanelRow::Item(0)));
+}
+
+#[test]
+fn right_cursor_walks_the_tree_including_headers() {
+    // Regression (spec 024): the right panel's cursor walks the same
+    // tree it renders — group and sub-category headers are reachable
+    // rows, so scrolling up reaches the very top (the group header),
+    // not just the first item.
+    let mut a = test_item("Führerschein", "Ausland: Karten");
+    a.categories = vec!["Ausland: Karten".to_string()];
+    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
+    b.categories = vec!["Ausland: Handgepäck".to_string()];
+    let mut state = test_state(vec![a, b]);
+    state.focus_side = FocusSide::Right;
+    // The right rows: Group(Ausland), Category(Handgepäck), item,
+    // Category(Karten), item (sorted order)
+    let rows = state.right_rows();
+    assert_eq!(rows.len(), 5);
+    assert!(matches!(&rows[0], PanelRow::Group(g) if g == "Ausland"));
+    // The cursor starts at the group header and walks every row
+    assert_eq!(state.selected_index, 0);
+    state.move_cursor_down();
+    assert_eq!(state.selected_index, 1);
+    assert!(matches!(
+        state.active_rows()[state.selected_index],
+        PanelRow::Category(_)
+    ));
+    state.move_cursor_down();
+    assert!(matches!(
+        state.active_rows()[state.selected_index],
+        PanelRow::Item(_)
+    ));
+    // Walking up from the first item reaches the headers and the top
+    state.move_cursor_up();
+    state.move_cursor_up();
+    assert_eq!(state.selected_index, 0);
+    assert!(matches!(
+        state.active_rows()[state.selected_index],
+        PanelRow::Group(_)
+    ));
+    // Up at the top stays at the top
+    state.move_cursor_up();
+    assert_eq!(state.selected_index, 0);
 }

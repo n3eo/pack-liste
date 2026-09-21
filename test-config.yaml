@@ -806,7 +806,7 @@ items:
   auto_quantity: true
 - name: Bargeld (Landeswährung)
   categories:
-  - 'Ausland: Ausland'
+  - 'Ausland: Handgepäck'
   quantity: 5
   auto_quantity: false
 - name: Steckdosenadapter
@@ -906,4 +906,4 @@ modifiers:
     multiplier: 0.9
   - name: snowy
     multiplier: 1.8
-last_trip_file: /home/nico/Documents/Urlaub/2026/Italien.yaml
+last_trip_file: /tmp/pack-liste-verify/ref.yaml

@@ -2,10 +2,10 @@ use anyhow::Result;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::models::packing_list::PackingList;
-use crate::ui::hints::{HintSurface, hint_entries, hint_line};
+use crate::ui::hints::{HintSurface, hint_entries, hint_line, hint_rows};
 use crate::ui::screens::config::draw_config_screen;
 use crate::ui::screens::editor::draw_config_editor_screen;
 use crate::ui::screens::help::draw_help_screen;
@@ -143,30 +143,51 @@ fn draw_item_dialog(
     let name_para = Paragraph::new(vec![name_line]);
     f.render_widget(name_para, name_area);
 
-    // Draw category field
+    // Draw category field: the selected category inline, with the
+    // membership marker when the dialog carries a membership set
+    // (edit dialog's Space multi-select). Left/Right cycle the
+    // selection; the value is always visible.
     let category_area = Rect {
         x: content_area.x,
         y: content_area.y + 1,
         width: content_area.width,
         height: 1,
     };
-    let category_line = Line::from(vec![Span::raw("Category: ").style(
-        if fields.field == InputField::Category {
+    let selected_category = if fields.category_index < fields.category_list.len() {
+        fields.category_list[fields.category_index].as_str()
+    } else {
+        fields.category
+    };
+    let is_member = fields
+        .selected_categories
+        .as_ref()
+        .is_some_and(|set| set.iter().any(|c| c == selected_category));
+    let membership_marker = match fields.selected_categories.as_ref() {
+        Some(_) => {
+            if is_member {
+                "✓ "
+            } else {
+                "○ "
+            }
+        }
+        None => "",
+    };
+    let category_line = Line::from(vec![
+        Span::raw("Category: ").style(if fields.field == InputField::Category {
             field_style
         } else {
             normal_style
-        },
-    )]);
+        }),
+        Span::raw(membership_marker).fg(if is_member { Color::Green } else { Color::Red }),
+        Span::raw(selected_category).style(if fields.field == InputField::Category {
+            field_style
+        } else {
+            normal_style
+        }),
+        Span::raw("  (←/→ change)").dim(),
+    ]);
     let category_para = Paragraph::new(vec![category_line]);
     f.render_widget(category_para, category_area);
-
-    // Draw category dropdown or selected category
-    let dropdown_area = Rect {
-        x: content_area.x + 10,
-        y: content_area.y + 1,
-        width: content_area.width - 10,
-        height: 1,
-    };
 
     // Draw quantity field
     let quantity_area = Rect {
@@ -261,14 +282,18 @@ fn draw_item_dialog(
     let buffer_para = Paragraph::new(vec![buffer_line]);
     f.render_widget(buffer_para, buffer_area);
 
-    // Draw instructions
+    // Draw instructions: packed into rows that fit the popup width so
+    // no binding is cut off mid-word
     let instructions_area = Rect {
         x: content_area.x,
         y: content_area.y + 6,
         width: content_area.width,
         height: content_area.height - 6,
     };
-    let instructions = Paragraph::new(hint_line(hint_entries(HintSurface::AddEditPopup)));
+    let instructions = Paragraph::new(hint_rows(
+        hint_entries(HintSurface::AddEditPopup),
+        instructions_area.width as usize,
+    ));
     f.render_widget(instructions, instructions_area);
 
     // Text cursor (spec 020, US2): a highlighted cell immediately
@@ -297,47 +322,6 @@ fn draw_item_dialog(
                 cell,
             );
         }
-    }
-
-    // Draw category dropdown or selected category (last, so the open dropdown overlays the fields below)
-    if fields.field == InputField::Category {
-        // Draw dropdown list
-        let category_items: Vec<ListItem> = fields
-            .category_list
-            .iter()
-            .map(|c| ListItem::new(c.as_str()))
-            .collect();
-
-        let category_list_widget = List::new(category_items)
-            .highlight_style(Style::new().fg(Color::Yellow).bold())
-            .highlight_symbol("> ");
-
-        let dropdown_height = 5.min(fields.category_list.len() as u16 + 1);
-        let dropdown_list_area = Rect {
-            x: dropdown_area.x,
-            y: dropdown_area.y,
-            width: dropdown_area.width,
-            height: dropdown_height,
-        };
-        f.render_widget(category_list_widget, dropdown_list_area);
-
-        // Highlight selected fields.category
-        if fields.category_index < fields.category_list.len() {
-            let selected_category = &fields.category_list[fields.category_index];
-            let selected_line =
-                Line::from(vec![Span::raw(selected_category).fg(Color::Yellow).bold()]);
-            let selected_para = Paragraph::new(vec![selected_line]);
-            f.render_widget(selected_para, dropdown_area);
-        }
-    } else {
-        // Show selected fields.category text
-        let selected_category = if fields.category_index < fields.category_list.len() {
-            &fields.category_list[fields.category_index]
-        } else {
-            fields.category
-        };
-        let category_text = Paragraph::new(vec![Line::from(selected_category)]);
-        f.render_widget(category_text, dropdown_area);
     }
 }
 

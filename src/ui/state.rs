@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use crate::config::modifiers::ModifiersConfig;
-use crate::models::item::{Item, QuantityBuffer};
+use crate::models::item::{Item, QuantityBuffer, category_layers};
 use crate::models::packing_list::PackingList;
 use crate::models::weekdays::Weekdays;
 use crate::quantity::calculation::QuantityCalculation;
@@ -71,19 +71,6 @@ pub(crate) enum InputField {
 }
 
 impl InputField {
-    /// The field before this one in the cycle (used by prev).
-    fn cycle_back(&self) -> Self {
-        // walk the cycle until the next of some field is self
-        let mut f = *self;
-        for _ in 0..6 {
-            f = f.next();
-            if f.next() == *self {
-                return f;
-            }
-        }
-        *self
-    }
-
     /// The next field in the dialog's cycle (wrapping).
     pub(crate) fn next(&self) -> Self {
         match self {
@@ -98,7 +85,17 @@ impl InputField {
 
     /// The previous field in the dialog's cycle (wrapping).
     pub(crate) fn prev(&self) -> Self {
-        self.next().cycle_back()
+        // The predecessor of self: the field whose next() is self.
+        // (Not self.next().cycle_back() — that computes the
+        // predecessor of the successor, which is self again.)
+        let mut f = *self;
+        for _ in 0..6 {
+            f = f.next();
+            if f.next() == *self {
+                return f;
+            }
+        }
+        *self
     }
 }
 
@@ -219,6 +216,7 @@ impl InputMode {
                 auto_quantity: Some(*auto_quantity),
                 category_list,
                 category_index: *category_index,
+                selected_categories: None,
                 rate,
                 buffer_kind: *buffer_kind,
                 buffer_value,
@@ -231,6 +229,7 @@ impl InputMode {
                 auto_quantity,
                 category_list,
                 category_index,
+                selected_categories,
                 rate,
                 buffer_kind,
                 buffer_value,
@@ -243,6 +242,7 @@ impl InputMode {
                 auto_quantity: Some(*auto_quantity),
                 category_list,
                 category_index: *category_index,
+                selected_categories: Some(selected_categories),
                 rate,
                 buffer_kind: *buffer_kind,
                 buffer_value,
@@ -271,6 +271,9 @@ pub(crate) struct PopupFields<'a> {
     pub(crate) auto_quantity: Option<bool>,
     pub(crate) category_list: &'a [String],
     pub(crate) category_index: usize,
+    /// The edit dialog's membership set (Space multi-select); None in
+    /// the add dialog, which has a single category
+    pub(crate) selected_categories: Option<&'a Vec<String>>,
     /// The per-day rate as dialog text (spec 010)
     pub(crate) rate: &'a str,
     /// The buffer kind being edited (spec 010)
@@ -304,6 +307,9 @@ pub(crate) struct AppDrawState {
     pub(crate) modifiers: ModifiersConfig,
     pub(crate) focus: Focus,
     pub(crate) collapsed_categories: Vec<String>,
+    /// Collapsed top-layer groups (spec 024): the part before the
+    /// first ": ". Session state, not persisted.
+    pub(crate) collapsed_groups: Vec<String>,
     pub(crate) selected_index: usize,
     pub(crate) focus_side: FocusSide,
     /// Fullscreen compiled-list view (spec 007): presentation-only;
@@ -397,6 +403,11 @@ pub(crate) enum ModifierField {
 // A navigable row of a panel: a category header or an item
 #[derive(Clone, Debug)]
 pub(crate) enum PanelRow {
+    /// A top-layer group header (spec 024): the part before the first
+    /// ": " of its categories
+    Group(String),
+    /// A sub-category header; the payload is the FULL category string
+    /// (the identity for collapse/selection/recalculation)
     Category(String),
     Item(usize), // index into packing_list.items
 }
@@ -417,12 +428,72 @@ pub(crate) fn group_items_by_category<'a>(
     map
 }
 
+/// The visible slice of a panel's rows with a sticky category header:
+/// when the scroll window starts mid-category, the category's header
+/// is pinned to the viewport's first row so no item is ever shown
+/// orphaned from its group. Each entry carries the row's position in
+/// the full row list (the pinned header keeps its original position,
+/// above the window). Pure — recomputed per frame.
+pub(crate) fn sticky_rows(
+    rows: &[PanelRow],
+    scroll: usize,
+    viewport_height: usize,
+) -> Vec<(usize, PanelRow)> {
+    let mut visible: Vec<(usize, PanelRow)> = rows
+        .iter()
+        .enumerate()
+        .skip(scroll)
+        .take(viewport_height)
+        .map(|(pos, r)| (pos, r.clone()))
+        .collect();
+    if scroll == 0 || visible.is_empty() {
+        return visible;
+    }
+    // Pin the OUTERMOST scrolled-off header (spec 024, research R5):
+    // an Item row pins its nearest off-screen header (sub-category or
+    // group); a Category row pins its group when that group is also
+    // off-screen. One pinned row maximum.
+    let pin_target = match &visible[0].1 {
+        PanelRow::Item(_) => rows[..scroll]
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(pos, r)| match r {
+                PanelRow::Group(g) => Some((pos, PanelRow::Group(g.clone()))),
+                PanelRow::Category(c) => Some((pos, PanelRow::Category(c.clone()))),
+                _ => None,
+            }),
+        PanelRow::Category(c) => {
+            // Pin only the enclosing group, and only when it is
+            // off-screen above
+            let (top, _) = category_layers(c);
+            rows[..scroll]
+                .iter()
+                .enumerate()
+                .rev()
+                .find_map(|(pos, r)| match r {
+                    PanelRow::Group(g) if *g == top => Some((pos, PanelRow::Group(g.clone()))),
+                    _ => None,
+                })
+        }
+        PanelRow::Group(_) => None,
+    };
+    if let Some((pos, row)) = pin_target {
+        visible.insert(0, (pos, row));
+        visible.pop();
+    }
+    visible
+}
+
 /// The scope of an explicit recalculate action (spec 018):
 /// the current item, the current item's category, or everything.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum RecalculateScope {
     Item(usize),
     Category(String),
+    /// A top-layer group (spec 024): every item whose any category's
+    /// top layer matches
+    Group(String),
     All,
 }
 
@@ -443,19 +514,46 @@ impl AppDrawState {
     /// The left panel's rows in display order: each category header,
     /// followed by its items unless the category is collapsed.
     pub(crate) fn left_rows(&self) -> Vec<PanelRow> {
-        // Rows of the left panel in display order: each category header,
-        // followed by its items unless the category is collapsed
+        // Rows of the left panel in display order (spec 024): each
+        // top-layer group header, then its sub-category headers with
+        // their items — unless the group or the sub-category is
+        // collapsed. Separator-free categories render as a group with
+        // their items directly beneath (no sub-category row).
         let categories_map =
             group_items_by_category(self.packing_list.items.iter().enumerate(), |item| {
                 item.categories.clone()
             });
 
+        // Group the categories by top layer, preserving sorted order
+        let mut group_order: Vec<String> = Vec::new();
+        let mut groups: std::collections::BTreeMap<String, Vec<&String>> =
+            std::collections::BTreeMap::new();
+        for category in categories_map.keys() {
+            let (top, _) = category_layers(category);
+            if !groups.contains_key(top) {
+                group_order.push(top.to_string());
+            }
+            groups.entry(top.to_string()).or_default().push(category);
+        }
+
         let mut rows = Vec::new();
-        for (category, items) in &categories_map {
-            rows.push(PanelRow::Category(category.clone()));
-            if !self.collapsed_categories.contains(category) {
-                for (idx, _) in items {
-                    rows.push(PanelRow::Item(*idx));
+        for top in &group_order {
+            rows.push(PanelRow::Group(top.clone()));
+            if self.collapsed_groups.contains(top) {
+                continue;
+            }
+            for category in &groups[top] {
+                let has_sub = category_layers(category).1.is_some();
+                // A separator-free category has no sub-category row:
+                // its items sit directly beneath the group
+                let sub_collapsed = self.collapsed_categories.contains(*category);
+                if has_sub {
+                    rows.push(PanelRow::Category((*category).clone()));
+                }
+                if !sub_collapsed {
+                    for (idx, _) in &categories_map[*category] {
+                        rows.push(PanelRow::Item(*idx));
+                    }
                 }
             }
         }
@@ -464,9 +562,11 @@ impl AppDrawState {
 
     /// The selected items in the order they are displayed on the right
     /// panel (grouped by primary category).
-    pub(crate) fn right_item_order(&self) -> Vec<usize> {
-        // Selected items in the order they are displayed on the right
-        // panel (grouped by category)
+    /// The right panel's rows (spec 024): the two-layer tree over
+    /// the selected items — group headers, sub-category headers,
+    /// items. The cursor walks the same rows the panel renders, so
+    /// every header is reachable by navigation.
+    pub(crate) fn right_rows(&self) -> Vec<PanelRow> {
         let categories_map = group_items_by_category(
             self.packing_list
                 .items
@@ -476,22 +576,40 @@ impl AppDrawState {
             |item| vec![item.primary_category().to_string()],
         );
 
-        let mut order = Vec::new();
-        for items in categories_map.values() {
-            order.extend(items.iter().map(|(idx, _)| *idx));
+        // Group the categories by top layer, preserving sorted order
+        let mut group_order: Vec<String> = Vec::new();
+        let mut groups: std::collections::BTreeMap<String, Vec<&String>> =
+            std::collections::BTreeMap::new();
+        for category in categories_map.keys() {
+            let (top, _) = category_layers(category);
+            if !groups.contains_key(top) {
+                group_order.push(top.to_string());
+            }
+            groups.entry(top.to_string()).or_default().push(category);
         }
-        order
+
+        let mut rows = Vec::new();
+        for top in &group_order {
+            rows.push(PanelRow::Group(top.clone()));
+            for category in &groups[top] {
+                let has_sub = category_layers(category).1.is_some();
+                if has_sub {
+                    rows.push(PanelRow::Category((*category).clone()));
+                }
+                for (idx, _) in &categories_map[*category] {
+                    rows.push(PanelRow::Item(*idx));
+                }
+            }
+        }
+        rows
     }
 
-    // Rows the cursor moves over on the focused side
+    // Rows the cursor moves over on the focused side: the same tree
+    // the focused panel renders (spec 024 — every header reachable)
     pub(crate) fn active_rows(&self) -> Vec<PanelRow> {
         match self.focus_side {
             FocusSide::Left => self.left_rows(),
-            FocusSide::Right => self
-                .right_item_order()
-                .into_iter()
-                .map(PanelRow::Item)
-                .collect(),
+            FocusSide::Right => self.right_rows(),
         }
     }
 
@@ -504,10 +622,12 @@ impl AppDrawState {
         }
     }
 
-    // The category the cursor is on (header row or one of its items)
+    // The category the cursor is on (header row or one of its items).
+    // A group header resolves to the group's name (the top layer).
     pub(crate) fn cursor_category(&self) -> Option<String> {
         let rows = self.active_rows();
         match rows.get(self.selected_index) {
+            Some(PanelRow::Group(g)) => Some(g.clone()),
             Some(PanelRow::Category(c)) => Some(c.clone()),
             Some(PanelRow::Item(index)) => Some(
                 self.packing_list.items[*index]
@@ -521,35 +641,155 @@ impl AppDrawState {
     // Collapse (true) or expand (false) the category under the cursor.
     // When collapsing, the cursor moves to the category's header row so it
     // stays visible.
-    pub(crate) fn set_category_collapsed(&mut self, collapsed: bool) {
-        let Some(category) = self.cursor_category() else {
-            return;
-        };
-
-        if collapsed {
-            if !self.collapsed_categories.contains(&category) {
-                self.collapsed_categories.push(category.clone());
-            }
-            // Move the cursor to the category's header row
-            let rows = self.active_rows();
-            if let Some(row) = rows
-                .iter()
-                .position(|r| matches!(r, PanelRow::Category(c) if *c == category))
-            {
-                self.selected_index = row;
-            }
-        } else {
-            self.collapsed_categories.retain(|c| c != &category);
+    /// The recalculate scope for the cursor's row (spec 024): a Group
+    /// row resolves to the group scope; a Category row to its
+    /// full-string category; an item to its primary category.
+    pub(crate) fn cursor_recalc_scope(&self) -> Option<RecalculateScope> {
+        let rows = self.active_rows();
+        match rows.get(self.selected_index) {
+            Some(PanelRow::Group(g)) => Some(RecalculateScope::Group(g.clone())),
+            Some(PanelRow::Category(c)) => Some(RecalculateScope::Category(c.clone())),
+            Some(PanelRow::Item(index)) => Some(RecalculateScope::Item(*index)),
+            None => None,
         }
     }
 
-    /// Toggle collapse of the category the cursor is on.
+    // Collapse (true) or expand (false) the header under the cursor,
+    // resolving by row (spec 024): a Group row toggles the group
+    // (hiding its whole sub-tree); a Category row toggles the
+    // sub-category (hiding its items only); an item resolves to its
+    // primary category's sub-category. When collapsing, the cursor
+    // moves to the header it collapsed so it stays visible.
+    pub(crate) fn set_category_collapsed(&mut self, collapsed: bool) {
+        let rows = self.active_rows();
+        let Some(row) = rows.get(self.selected_index) else {
+            return;
+        };
+        // The header this action targets: (name, is_group)
+        let (target, is_group) = match row {
+            PanelRow::Group(g) => (g.clone(), true),
+            PanelRow::Category(c) => (c.clone(), false),
+            PanelRow::Item(index) => (
+                self.packing_list.items[*index]
+                    .primary_category()
+                    .to_string(),
+                false,
+            ),
+        };
+
+        if is_group {
+            // A group whose categories are all separator-free has no
+            // sub-level: collapsing it collapses each category's
+            // items (the group row is their only header, spec 024)
+            let group_categories: Vec<String> = self
+                .packing_list
+                .items
+                .iter()
+                .flat_map(|item| item.categories.iter().cloned())
+                .filter(|c| category_layers(c).0 == target)
+                .collect();
+            let has_sub = group_categories
+                .iter()
+                .any(|c| category_layers(c).1.is_some());
+            if !has_sub {
+                if collapsed {
+                    for category in &group_categories {
+                        if !self.collapsed_categories.contains(category) {
+                            self.collapsed_categories.push(category.clone());
+                        }
+                    }
+                    // The cursor stays on the group's header row
+                    let rows = self.active_rows();
+                    if let Some(row) = rows
+                        .iter()
+                        .position(|r| matches!(r, PanelRow::Group(g) if *g == target))
+                    {
+                        self.selected_index = row;
+                    }
+                } else {
+                    for category in &group_categories {
+                        self.collapsed_categories.retain(|c| c != category);
+                    }
+                }
+                return;
+            }
+            if collapsed {
+                if !self.collapsed_groups.contains(&target) {
+                    self.collapsed_groups.push(target.clone());
+                }
+                // The cursor stays on the group's header row
+                let rows = self.active_rows();
+                if let Some(row) = rows
+                    .iter()
+                    .position(|r| matches!(r, PanelRow::Group(g) if *g == target))
+                {
+                    self.selected_index = row;
+                }
+            } else {
+                self.collapsed_groups.retain(|g| g != &target);
+            }
+            return;
+        }
+
+        if collapsed {
+            if !self.collapsed_categories.contains(&target) {
+                self.collapsed_categories.push(target.clone());
+            }
+            // Move the cursor to the category's header row: the
+            // sub-category row when one exists, otherwise the group
+            // header (separator-free categories have no sub-row)
+            let rows = self.active_rows();
+            let header_row = rows
+                .iter()
+                .position(|r| matches!(r, PanelRow::Category(c) if *c == target))
+                .or_else(|| {
+                    let (top, _) = category_layers(&target);
+                    rows.iter()
+                        .position(|r| matches!(r, PanelRow::Group(g) if *g == top))
+                });
+            if let Some(row) = header_row {
+                self.selected_index = row;
+            }
+        } else {
+            self.collapsed_categories.retain(|c| c != &target);
+        }
+    }
+
+    /// Toggle collapse of the header under the cursor (spec 024):
+    /// the group level on a Group row, the sub-category level on a
+    /// Category row or an item. A group whose categories are all
+    /// separator-free collapses at the category level (its group
+    /// row is the only header those categories have).
     pub(crate) fn toggle_category_collapse(&mut self) {
-        // Toggle collapse of the category the cursor is on
-        let collapsed = self
-            .cursor_category()
-            .map(|c| self.collapsed_categories.contains(&c))
-            .unwrap_or(false);
+        let rows = self.active_rows();
+        let Some(row) = rows.get(self.selected_index) else {
+            return;
+        };
+        let collapsed = match row {
+            PanelRow::Group(g) => {
+                // Separator-free group: the category level is the
+                // effective collapse state
+                let has_sub = self.packing_list.items.iter().any(|item| {
+                    item.categories
+                        .iter()
+                        .any(|c| category_layers(c).0 == *g && category_layers(c).1.is_some())
+                });
+                if has_sub {
+                    self.collapsed_groups.contains(g)
+                } else {
+                    self.packing_list.items.iter().any(|item| {
+                        let primary = item.primary_category();
+                        category_layers(primary).0 == *g
+                            && self.collapsed_categories.iter().any(|c| c == primary)
+                    })
+                }
+            }
+            PanelRow::Category(c) => self.collapsed_categories.contains(c),
+            PanelRow::Item(index) => {
+                let primary = self.packing_list.items[*index].primary_category();
+                self.collapsed_categories.iter().any(|c| c == primary)
+            }
+        };
         self.set_category_collapsed(!collapsed);
     }
 
@@ -565,21 +805,42 @@ impl AppDrawState {
     /// Toggle selection of every item in the cursor's category, then
     /// collapse the group when added and expand it when removed.
     pub(crate) fn toggle_category_selection(&mut self) {
-        // Toggle selection of all items in the current category, then
-        // collapse the group when items were added to the trip and expand
-        // it when they were removed
-        let Some(category) = self.cursor_category() else {
+        // Toggle selection of the header under the cursor, resolving
+        // by row (spec 024): a Group row flips every item whose any
+        // category's top layer matches; a Category row (or an item)
+        // flips the full-string category's items. The group collapses
+        // when items were added to the trip and expands when removed.
+        let rows = self.active_rows();
+        let Some(row) = rows.get(self.selected_index) else {
             return;
+        };
+        let (group, category) = match row {
+            PanelRow::Group(g) => (Some(g.clone()), None),
+            PanelRow::Category(c) => (None, Some(c.clone())),
+            PanelRow::Item(index) => (
+                None,
+                Some(
+                    self.packing_list.items[*index]
+                        .primary_category()
+                        .to_string(),
+                ),
+            ),
+        };
+
+        let matches = |item: &Item| match (&group, &category) {
+            (Some(top), _) => item.categories.iter().any(|c| category_layers(c).0 == *top),
+            (None, Some(c)) => item.in_category(c),
+            (None, None) => false,
         };
 
         let was_selected = self
             .packing_list
             .items
             .iter()
-            .any(|item| item.in_category(&category) && item.selected);
+            .any(|item| matches(item) && item.selected);
 
         for item in &mut self.packing_list.items {
-            if item.in_category(&category) {
+            if matches(item) {
                 item.selected = !item.selected;
             }
         }
@@ -616,25 +877,43 @@ impl AppDrawState {
     // Cycle the category selection in the add/edit dialog (Left/Right);
     // clamped at the list bounds, only when the Category field is focused
     pub(crate) fn cycle_category_selection(&mut self, direction: i32) {
-        let (field, category_list, category_index) = match &mut self.input_mode {
+        let (field, category_list, category_index, selected_categories) = match &mut self.input_mode
+        {
             InputMode::AddingItem {
                 field,
                 category_list,
                 category_index,
                 ..
-            } => (field, category_list, category_index),
+            } => (field, category_list, category_index, None),
             InputMode::EditingItem {
                 field,
                 category_list,
                 category_index,
+                selected_categories,
                 ..
-            } => (field, category_list, category_index),
+            } => (
+                field,
+                category_list,
+                category_index,
+                Some(selected_categories),
+            ),
             _ => return,
         };
-        if *field == InputField::Category {
-            let target = (*category_index as i32 + direction)
-                .clamp(0, category_list.len().saturating_sub(1) as i32);
-            *category_index = target as usize;
+        if *field != InputField::Category {
+            return;
+        }
+        let target = (*category_index as i32 + direction)
+            .clamp(0, category_list.len().saturating_sub(1) as i32);
+        *category_index = target as usize;
+        // The highlighted category becomes the selection (spec 014:
+        // Left/Right adjust the value): the item's category follows
+        // the highlight, so the change persists on save. In the edit
+        // dialog the membership set follows too — cycling replaces
+        // the memberships with the highlighted category.
+        if let Some(selected) = selected_categories
+            && let Some(highlighted) = category_list.get(*category_index)
+        {
+            *selected = vec![highlighted.clone()];
         }
     }
 
@@ -701,6 +980,9 @@ impl AppDrawState {
                     RecalculateScope::All => true,
                     RecalculateScope::Item(i) => *i == index,
                     RecalculateScope::Category(c) => item.in_category(c),
+                    RecalculateScope::Group(top) => {
+                        item.categories.iter().any(|c| category_layers(c).0 == *top)
+                    }
                 };
                 if item.auto_quantity && in_scope {
                     ItemQuantitySpec::Auto {
@@ -883,31 +1165,11 @@ impl AppDrawState {
             }
             Screen::Config | Screen::ConfigEditor | Screen::Help => {}
             Screen::Main => {
-                if matches!(self.input_mode, InputMode::Normal) {
+                if matches!(self.input_mode, InputMode::Normal)
                     // Navigate up through the visible rows of the focused side
-                    if self.selected_index > 0 {
-                        self.selected_index -= 1;
-                    }
-                } else if let InputMode::AddingItem {
-                    field,
-                    category_index,
-                    ..
-                } = &mut self.input_mode
+                    && self.selected_index > 0
                 {
-                    // Only navigate category dropdown when category field is selected
-                    if *field == InputField::Category && *category_index > 0 {
-                        *category_index -= 1;
-                    }
-                } else if let InputMode::EditingItem {
-                    field,
-                    category_index,
-                    ..
-                } = &mut self.input_mode
-                {
-                    // Only navigate category dropdown when category field is selected
-                    if *field == InputField::Category && *category_index > 0 {
-                        *category_index -= 1;
-                    }
+                    self.selected_index -= 1;
                 }
             }
         }
@@ -923,37 +1185,11 @@ impl AppDrawState {
             }
             Screen::Config | Screen::ConfigEditor | Screen::Help => {}
             Screen::Main => {
+                // Navigate down through the visible rows of the focused side
                 if matches!(self.input_mode, InputMode::Normal) {
-                    // Navigate down through the visible rows of the focused side
                     let rows = self.active_rows();
                     if self.selected_index < rows.len().saturating_sub(1) {
                         self.selected_index += 1;
-                    }
-                } else if let InputMode::AddingItem {
-                    field,
-                    category_index,
-                    category_list,
-                    ..
-                } = &mut self.input_mode
-                {
-                    // Only navigate category dropdown when category field is selected
-                    if *field == InputField::Category
-                        && *category_index < category_list.len().saturating_sub(1)
-                    {
-                        *category_index += 1;
-                    }
-                } else if let InputMode::EditingItem {
-                    field,
-                    category_index,
-                    category_list,
-                    ..
-                } = &mut self.input_mode
-                {
-                    // Only navigate category dropdown when category field is selected
-                    if *field == InputField::Category
-                        && *category_index < category_list.len().saturating_sub(1)
-                    {
-                        *category_index += 1;
                     }
                 }
             }

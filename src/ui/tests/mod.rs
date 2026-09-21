@@ -29,6 +29,7 @@ fn test_state(items: Vec<Item>) -> AppDrawState {
         modifiers: ModifiersConfig::default(),
         focus: Focus::TripFile,
         collapsed_categories: Vec::new(),
+        collapsed_groups: Vec::new(),
         selected_index: 0,
         focus_side: FocusSide::Left,
         fullscreen: false,
@@ -55,10 +56,9 @@ fn test_state(items: Vec<Item>) -> AppDrawState {
 
 // ---- Input-handling tests (US5): key events in, state out ----
 
-fn all_hint_surfaces() -> [HintSurface; 9] {
+fn all_hint_surfaces() -> [HintSurface; 8] {
     [
-        HintSurface::LeftPanel,
-        HintSurface::RightPanel,
+        HintSurface::MainScreen,
         HintSurface::Welcome,
         HintSurface::Config,
         HintSurface::AddEditPopup,

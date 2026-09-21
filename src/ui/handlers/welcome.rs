@@ -2,7 +2,7 @@ use anyhow::Result;
 use crossterm::event::KeyEvent;
 
 use crate::ui::input::App;
-use crate::ui::state::{Focus, FocusSide, InputField, InputMode, RecalculateScope, Screen};
+use crate::ui::state::{Focus, FocusSide, InputMode, Screen};
 
 /// Key handling of the welcome screen (file field editing, value
 /// adjustment, focus movement) and the resume prompt.
@@ -220,14 +220,12 @@ pub(crate) fn handle_main_input(app: &mut App, key: KeyEvent) -> Result<bool> {
             }
         }
         K::Char('r') | K::Char('R') => {
-            // Plain R = the current item (spec 018); on a category
-            // header it means the header's category (EC-001). The
-            // Ctrl+R / Ctrl+Shift+R chords are matched in the
-            // dispatcher before this arm.
-            if let Some(idx) = app.current_item_index() {
-                app.recalculate_current_scope(RecalculateScope::Item(idx))?;
-            } else if let Some(category) = app.current_category() {
-                app.recalculate_current_scope(RecalculateScope::Category(category))?;
+            // Plain R = the current item (spec 018); on a header it
+            // means the header's scope (EC-001): the sub-category or
+            // the whole group (spec 024). The Ctrl+R / Ctrl+Shift+R
+            // chords are matched in the dispatcher before this arm.
+            if let Some(scope) = app.draw_state.cursor_recalc_scope() {
+                app.recalculate_current_scope(scope)?;
             }
         }
         _ => {}
@@ -261,28 +259,11 @@ pub(crate) fn handle_dialog_input(app: &mut App, key: KeyEvent) -> Result<bool> 
                     app.cycle_dialog_field();
                 }
                 K::Up | K::Down => {
-                    // In the Category field, Up/Down move the dropdown
-                    // highlight (EC-001 of spec 020); in every other
-                    // field they cycle the dialog's fields
-                    let is_category = matches!(
-                        app.draw_state.input_mode,
-                        InputMode::AddingItem {
-                            field: InputField::Category,
-                            ..
-                        } | InputMode::EditingItem {
-                            field: InputField::Category,
-                            ..
-                        }
-                    );
-                    if is_category {
-                        if key.code == K::Up {
-                            app.draw_state.move_cursor_up();
-                        } else {
-                            app.draw_state.move_cursor_down();
-                        }
-                    } else if let InputMode::AddingItem { field, .. }
-                    | InputMode::EditingItem { field, .. } =
-                        &mut app.draw_state.input_mode
+                    // Up/Down cycle the dialog's fields uniformly
+                    // (spec 014: vertical navigates); the category
+                    // selection is adjusted with Left/Right
+                    if let InputMode::AddingItem { field, .. }
+                    | InputMode::EditingItem { field, .. } = &mut app.draw_state.input_mode
                     {
                         *field = if key.code == K::Up {
                             field.prev()

@@ -101,12 +101,13 @@ fn hint_entries_match_the_contract_binding_sets() {
     // the contract's binding set exactly, so removing or corrupting
     // an entry (e.g. deleting ("C", "Collapse") from the left
     // panel) fails this test.
-    let expected: [(HintSurface, &[(&str, &str)]); 9] = [
+    let expected: [(HintSurface, &[(&str, &str)]); 8] = [
         (
-            HintSurface::LeftPanel,
+            HintSurface::MainScreen,
             &[
                 ("↑/↓", "Navigate"),
                 ("Space", "Select"),
+                ("Space", "Packed"),
                 ("Ctrl+Space", "Category"),
                 ("A", "Add"),
                 ("E", "Edit"),
@@ -115,20 +116,7 @@ fn hint_entries_match_the_contract_binding_sets() {
                 ("R", "Recalc item"),
                 ("Ctrl+R", "Recalc category"),
                 ("Ctrl+Shift+R", "Recalc all"),
-                ("Tab", "Switch"),
-                ("F", "Fullscreen"),
-                ("?", "Help"),
-            ],
-        ),
-        (
-            HintSurface::RightPanel,
-            &[
-                ("↑/↓", "Navigate"),
-                ("Space", "Packed"),
-                ("R", "Recalc item"),
-                ("Ctrl+R", "Recalc category"),
-                ("Ctrl+Shift+R", "Recalc all"),
-                ("Tab", "Switch"),
+                ("Tab", "Switch panel"),
                 ("F", "Fullscreen"),
                 ("?", "Help"),
             ],
@@ -136,10 +124,10 @@ fn hint_entries_match_the_contract_binding_sets() {
         (
             HintSurface::Welcome,
             &[
-                ("↑/↓", "Navigate fields"),
-                ("←/→", "Adjust values"),
+                ("↑/↓", "Navigate"),
+                ("←/→", "Adjust"),
                 ("+/-", "Weekdays"),
-                ("Enter", "Edit file / Continue"),
+                ("Enter", "Continue"),
                 ("F", "Edit path"),
                 ("O", "Config"),
                 ("Ctrl+E", "Raw editor"),
@@ -149,8 +137,8 @@ fn hint_entries_match_the_contract_binding_sets() {
         (
             HintSurface::Config,
             &[
-                ("Tab", "Section"),
-                ("↑/↓", "Move"),
+                ("Tab", "Switch section"),
+                ("↑/↓", "Navigate"),
                 ("A", "Add"),
                 ("E", "Edit"),
                 ("D", "Delete"),
@@ -161,10 +149,10 @@ fn hint_entries_match_the_contract_binding_sets() {
         (
             HintSurface::AddEditPopup,
             &[
-                ("Tab", "Cycle fields"),
-                ("↑/↓", "Fields / dropdown"),
-                ("←/→", "Adjust values"),
-                ("Space", "Mode / Buffer / Category"),
+                ("Tab", "Next field"),
+                ("↑/↓", "Navigate"),
+                ("←/→", "Adjust"),
+                ("Space", "Toggle"),
                 ("Enter", "Save"),
                 ("Esc", "Cancel"),
             ],
@@ -179,16 +167,12 @@ fn hint_entries_match_the_contract_binding_sets() {
         ),
         (
             HintSurface::ModifierEditor,
-            &[
-                ("Tab", "Switch field"),
-                ("Enter", "Save"),
-                ("Esc", "Cancel"),
-            ],
+            &[("Tab", "Next field"), ("Enter", "Save"), ("Esc", "Cancel")],
         ),
         (
             HintSurface::RawEditor,
             &[
-                ("↑/↓/←/→", "Cursor"),
+                ("↑/↓/←/→", "Navigate"),
                 ("Home/End", "Line start/end"),
                 ("Enter", "New line"),
                 ("Backspace", "Delete"),
@@ -210,7 +194,7 @@ fn hint_entries_match_the_contract_binding_sets() {
 fn hint_lines_use_the_unified_style() {
     // The single constructor renders " | " separators and no
     // long-form arrow words; the corrupted text is gone.
-    let line = hint_line(hint_entries(HintSurface::LeftPanel));
+    let line = hint_line(hint_entries(HintSurface::MainScreen));
     let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
     assert!(text.contains(" | "), "hint line must use | separators");
     assert!(!text.contains("Up/Down"), "hint line must use glyphs");
@@ -218,8 +202,7 @@ fn hint_lines_use_the_unified_style() {
     let all_text = format!("{}{}", help_screen_text(), {
         let mut s = String::new();
         for surface in [
-            HintSurface::LeftPanel,
-            HintSurface::RightPanel,
+            HintSurface::MainScreen,
             HintSurface::Welcome,
             HintSurface::Config,
             HintSurface::AddEditPopup,
@@ -245,13 +228,15 @@ fn hint_lines_use_the_unified_style() {
 fn hint_rows_fit_width_and_keep_every_entry() {
     // At the minimum panel width (39 columns at an 80-column
     // terminal), every entry still appears and no row overflows.
-    let entries = hint_entries(HintSurface::LeftPanel);
-    let rows = hint_rows(entries, 39);
+    // The main screen's shared footer spans the full terminal width,
+    // so its minimum is the stacked-mode width (40 columns).
+    let entries = hint_entries(HintSurface::MainScreen);
+    let rows = hint_rows(entries, 40);
     let mut seen: Vec<(&str, &str)> = Vec::new();
     for row in &rows {
         let text: String = row.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(
-            text.chars().count() <= 39,
+            text.chars().count() <= 40,
             "hint row exceeds the panel width: {text:?}"
         );
         // Count full "KEY Action" occurrences, not substrings
@@ -263,10 +248,117 @@ fn hint_rows_fit_width_and_keep_every_entry() {
     }
     // Every entry appears exactly once across the rows
     assert_eq!(seen.len(), entries.len(), "every entry must appear once");
-    // A wide width packs everything into one row
-    assert_eq!(hint_rows(entries, 200).len(), 1);
+    // A wide width packs everything into one row (the full set is
+    // ~215 columns including separators)
+    assert_eq!(hint_rows(entries, 220).len(), 1);
     // An empty entry list still yields one (blank) row
-    assert_eq!(hint_rows(&[], 39).len(), 1);
+    assert_eq!(hint_rows(&[], 40).len(), 1);
 }
 
 // ---- US1/US3 (spec 018): the recalculate action ----
+
+// ---- Spec 023: the canonical binding table ----
+
+use crate::ui::hints::bindings;
+
+#[test]
+fn canonical_action_text_is_unique_per_key() {
+    // SC-001: every (key, meaning) has exactly one action text. The
+    // canonical table holds each pair once; no surface may show a
+    // text for a key that is not the canonical one for its meaning.
+    // A key with several meanings has several entries — but each
+    // (key, action) pair exists exactly once in the table.
+    let mut seen = std::collections::BTreeSet::new();
+    for (key, action) in bindings::ALL {
+        assert!(
+            seen.insert((key, action)),
+            "duplicate canonical pair: {key} -> {action}"
+        );
+    }
+    // Every surface's entries are canonical: each (key, action) pair
+    // a surface shows exists in the table (no surface-specific
+    // paraphrase can slip in).
+    for surface in all_hint_surfaces() {
+        for (key, action) in hint_entries(surface) {
+            assert!(
+                bindings::ALL.contains(&(*key, *action)),
+                "{surface:?} shows a non-canonical pair: {key} -> {action}"
+            );
+        }
+    }
+}
+
+#[test]
+fn canonical_entries_are_all_used() {
+    // Constitution I / FR-005: every canonical entry is referenced by
+    // at least one surface composition — no dead entries.
+    for (key, action) in bindings::ALL {
+        let used = all_hint_surfaces()
+            .iter()
+            .any(|surface| hint_entries(*surface).contains(&(key, action)));
+        assert!(
+            used,
+            "canonical pair {key} -> {action} is not used by any surface"
+        );
+    }
+}
+
+#[test]
+fn no_pair_repeats_on_one_screen() {
+    // SC-002: no (key, action) pair is visible twice on one screen.
+    // The main screen renders ONE shared footer (spec 023, US2); the
+    // config screen's footer and the modifier editor popup are
+    // visible together.
+    let config: std::collections::BTreeSet<(&str, &str)> =
+        hint_entries(HintSurface::Config).iter().copied().collect();
+    let editor: std::collections::BTreeSet<(&str, &str)> =
+        hint_entries(HintSurface::ModifierEditor)
+            .iter()
+            .copied()
+            .collect();
+    let shared_cfg: Vec<_> = config.intersection(&editor).collect();
+    assert!(
+        shared_cfg.is_empty(),
+        "the config screen and its popup restate shared pairs: {shared_cfg:?}"
+    );
+    // No composition contains a duplicate pair
+    for surface in all_hint_surfaces() {
+        let entries = hint_entries(surface);
+        let unique: std::collections::BTreeSet<_> = entries.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            entries.len(),
+            "{surface:?} contains a duplicate pair"
+        );
+    }
+}
+
+#[test]
+fn help_tokens_match_canonical_table() {
+    // FR-004: the help screen agrees with the canonical table — every
+    // key the help lists is a canonical key, and each description
+    // contains its key's canonical action word.
+    let help = help_screen_text();
+    let canonical_keys: std::collections::BTreeSet<&str> =
+        bindings::ALL.iter().map(|(k, _)| *k).collect();
+    for (key, action) in bindings::ALL {
+        // Every canonical key that a hint surface shows appears in the help
+        let used_by_surface = all_hint_surfaces()
+            .iter()
+            .any(|s| hint_entries(*s).contains(&(key, action)));
+        if used_by_surface {
+            assert!(
+                help.contains(key),
+                "help screen is missing the canonical key: {key}"
+            );
+            assert!(
+                help.contains(action),
+                "help description for {key} lacks the canonical action word: {action}"
+            );
+        }
+        assert!(
+            canonical_keys.contains(key),
+            "internal consistency: {key} must be a canonical key"
+        );
+    }
+}

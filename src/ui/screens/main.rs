@@ -5,11 +5,11 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use crate::models::item::Item;
+use crate::models::item::{Item, category_layers};
 use crate::ui::hints::{
     HintSurface, collapsed_hint_line, hint_entries, hint_rows, hint_rows_fit_budget,
 };
-use crate::ui::state::{AppDrawState, FocusSide, PanelRow, StatusKind, group_items_by_category};
+use crate::ui::state::{AppDrawState, FocusSide, PanelRow, StatusKind, sticky_rows};
 
 /// The main screen's layout mode (spec 006): a pure function of the
 /// viewport, recomputed per frame — no persisted state.
@@ -61,10 +61,30 @@ pub(crate) fn draw_main_screen(
     }
 
     // The layout adapts to the viewport (spec 006): side by side,
-    // stacked, or the too-small notice
-    match layout_mode(size.width, size.height) {
+    // stacked, or the too-small notice. One shared hint footer spans
+    // the full width below the panels (spec 023, US2 — every binding
+    // stated once for the whole screen).
+    let footer_height = {
+        let entries = hint_entries(HintSurface::MainScreen);
+        let hint_lines = if hint_rows_fit_budget(entries, size.width as usize, 3) {
+            hint_rows(entries, size.width as usize)
+        } else {
+            vec![collapsed_hint_line()]
+        };
+        hint_lines.len() as u16
+    };
+    let [panels_area, footer_area] = *Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(10), Constraint::Length(footer_height)])
+        .split(size)
+    else {
+        return;
+    };
+
+    match layout_mode(panels_area.width, panels_area.height) {
         LayoutMode::TooSmall => {
             draw_too_small_notice(f, size);
+            return;
         }
         LayoutMode::SideBySide => {
             // Split screen: left (all items), right (selected items only)
@@ -72,7 +92,7 @@ pub(crate) fn draw_main_screen(
                 .direction(Direction::Horizontal)
                 .margin(1)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(size)
+                .split(panels_area)
             else {
                 return;
             };
@@ -86,7 +106,7 @@ pub(crate) fn draw_main_screen(
                 .direction(Direction::Vertical)
                 .margin(1)
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(size)
+                .split(panels_area)
             else {
                 return;
             };
@@ -94,6 +114,17 @@ pub(crate) fn draw_main_screen(
             draw_selected_items_panel(f, bottom_area, state);
         }
     }
+
+    // The shared footer: the main screen's complete binding set,
+    // stated once (spec 023, US2)
+    let entries = hint_entries(HintSurface::MainScreen);
+    let hint_lines = if hint_rows_fit_budget(entries, footer_area.width as usize, 3) {
+        hint_rows(entries, footer_area.width as usize)
+    } else {
+        vec![collapsed_hint_line()]
+    };
+    let hints = Paragraph::new(hint_lines).wrap(Wrap { trim: true });
+    f.render_widget(hints, footer_area);
 }
 
 /// The too-small notice (spec 006, US4): the only thing drawn below
@@ -124,24 +155,15 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
     // The hint footer's height adapts to the panel width: entries are
     // packed into as few rows as fit, so every binding stays visible.
     // When the packed rows would squeeze the list below its minimum
-    // (spec 006, US5), the hints collapse to the single `? Help` line.
-    let entries = hint_entries(HintSurface::LeftPanel);
-    let hint_lines = if hint_rows_fit_budget(entries, area.width as usize, 3) {
-        hint_rows(entries, area.width as usize)
-    } else {
-        vec![collapsed_hint_line()]
-    };
-    let hints_height = hint_lines.len() as u16;
     // One extra row for the status line when a message is pending
     let status_height = u16::from(state.status.is_some());
-    let [title_area, list_area, status_area, hints_area] = *Layout::default()
+    let [title_area, list_area, status_area] = *Layout::default()
         .direction(Direction::Vertical)
         .margin(0)
         .constraints([
             Constraint::Length(1),
             Constraint::Min(10),
             Constraint::Length(status_height),
-            Constraint::Length(hints_height),
         ])
         .split(area)
     else {
@@ -159,12 +181,6 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
             .block(Block::default().borders(Borders::BOTTOM))
     };
     f.render_widget(title, title_area);
-
-    // Group items by category
-    let categories_map =
-        group_items_by_category(state.packing_list.items.iter().enumerate(), |item| {
-            item.categories.clone()
-        });
 
     // Cursor position within the panel's rows (only when the left side is focused)
     let current_row = if state.focus_side == FocusSide::Left {
@@ -190,53 +206,91 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
         }
     }
     scroll = scroll.min(total_rows.saturating_sub(viewport_height));
+
+    // The visible slice with a sticky category header: no item is
+    // ever orphaned from its group when scrolled mid-category. The
+    // pin displaces the window's last row — when the cursor is on
+    // the displaced row, scroll one further so the cursor stays
+    // visible (repeated until it is, or the scroll maxes out).
+    let max_scroll = total_rows.saturating_sub(viewport_height);
+    let mut visible_rows = sticky_rows(&rows, scroll, viewport_height);
+    if let Some(cursor) = current_row {
+        while scroll > 0
+            && scroll < max_scroll
+            && rows.get(cursor).is_some()
+            && cursor >= scroll
+            && !visible_rows.iter().any(|(pos, _)| *pos == cursor)
+        {
+            scroll += 1;
+            visible_rows = sticky_rows(&rows, scroll, viewport_height);
+        }
+    }
     state.left_scroll = scroll;
 
-    let mut row_index = 0;
-
-    for (category, items) in &categories_map {
-        let is_collapsed = state.collapsed_categories.contains(category);
-
-        // Category header
-        let category_symbol = if is_collapsed { "▶ " } else { "▼ " };
-        let category_line = Line::from(vec![
-            Span::raw(category_symbol).fg(Color::Yellow),
-            Span::raw(truncate_row_text(
-                category,
-                category_symbol,
-                "",
-                list_area.width as usize,
-            ))
-            .bold()
-            .fg(Color::Cyan),
-        ]);
-
-        let category_para =
-            Paragraph::new(vec![category_line]).block(Block::default().borders(Borders::NONE));
-
-        if row_index >= scroll && row_index - scroll < viewport_height {
-            let category_area = Rect {
-                x: list_area.x,
-                y: list_area.y + (row_index - scroll) as u16,
-                width: list_area.width,
-                height: 1,
-            };
-            f.render_widget(category_para, category_area);
-
-            if current_row == Some(row_index) {
-                // Highlight the category header the cursor is on
-                let highlight = Block::default().style(Style::new().bg(Color::DarkGray));
-                f.render_widget(highlight, category_area);
+    for (visible_index, (row_pos, row)) in visible_rows.iter().enumerate() {
+        let row_area = Rect {
+            x: list_area.x,
+            y: list_area.y + visible_index as u16,
+            width: list_area.width,
+            height: 1,
+        };
+        match row {
+            PanelRow::Group(group) => {
+                // The top-layer header (spec 024): the group's collapse
+                // symbol and name, unindented
+                let is_collapsed = state.collapsed_groups.contains(group);
+                let group_symbol = if is_collapsed { "▶ " } else { "▼ " };
+                let group_line = Line::from(vec![
+                    Span::raw(group_symbol).fg(Color::Yellow),
+                    Span::raw(truncate_row_text(
+                        group,
+                        group_symbol,
+                        "",
+                        list_area.width as usize,
+                    ))
+                    .bold()
+                    .fg(Color::Cyan),
+                ]);
+                let group_para =
+                    Paragraph::new(vec![group_line]).block(Block::default().borders(Borders::NONE));
+                f.render_widget(group_para, row_area);
+                // Highlight the group header the cursor is on
+                if current_row == Some(*row_pos) {
+                    let highlight = Block::default().style(Style::new().bg(Color::DarkGray));
+                    f.render_widget(highlight, row_area);
+                }
             }
-        }
-
-        row_index += 1;
-
-        // Draw items if category is not collapsed
-        if !is_collapsed {
-            for (_, item) in items {
-                let is_selected = item.selected;
-                let is_current = current_row == Some(row_index);
+            PanelRow::Category(category) => {
+                // The sub-category header (spec 024): the part after
+                // the first ": ", indented under its group; the payload
+                // stays the full category string (the identity)
+                let (_, sub) = category_layers(category);
+                let is_collapsed = state.collapsed_categories.contains(category);
+                let category_symbol = if is_collapsed { "▶ " } else { "▼ " };
+                let category_line = Line::from(vec![
+                    Span::raw("  ").fg(Color::Yellow),
+                    Span::raw(category_symbol).fg(Color::Yellow),
+                    Span::raw(truncate_row_text(
+                        sub.unwrap_or(category),
+                        &format!("  {category_symbol}"),
+                        "",
+                        list_area.width as usize,
+                    ))
+                    .bold()
+                    .fg(Color::Cyan),
+                ]);
+                let category_para = Paragraph::new(vec![category_line])
+                    .block(Block::default().borders(Borders::NONE));
+                f.render_widget(category_para, row_area);
+                // Highlight the category header the cursor is on
+                if current_row == Some(*row_pos) {
+                    let highlight = Block::default().style(Style::new().bg(Color::DarkGray));
+                    f.render_widget(highlight, row_area);
+                }
+            }
+            PanelRow::Item(item_index) => {
+                let item = &state.packing_list.items[*item_index];
+                let is_current = current_row == Some(*row_pos);
 
                 let item_style = if is_current {
                     Style::new().fg(Color::Yellow).bg(Color::DarkGray)
@@ -244,12 +298,12 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
                     Style::new()
                 };
 
-                let selection_symbol = if is_selected { "✓" } else { "○" };
+                let selection_symbol = if item.selected { "✓" } else { "○" };
 
                 let quantity_suffix = format!(" x{}", item.quantity);
                 let item_line = Line::from(vec![
                     Span::raw("  "),
-                    Span::raw(selection_symbol).fg(if is_selected {
+                    Span::raw(selection_symbol).fg(if item.selected {
                         Color::Green
                     } else {
                         Color::Red
@@ -268,17 +322,7 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
 
                 let item_para =
                     Paragraph::new(vec![item_line]).block(Block::default().borders(Borders::NONE));
-
-                if row_index >= scroll && row_index - scroll < viewport_height {
-                    let item_area = Rect {
-                        x: list_area.x,
-                        y: list_area.y + (row_index - scroll) as u16,
-                        width: list_area.width,
-                        height: 1,
-                    };
-                    f.render_widget(item_para, item_area);
-                }
-                row_index += 1;
+                f.render_widget(item_para, row_area);
             }
         }
     }
@@ -305,10 +349,6 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
         ]);
         f.render_widget(Paragraph::new(line), status_area);
     }
-
-    // Navigation hints: fixed footer, always visible
-    let hints = Paragraph::new(hint_lines).wrap(Wrap { trim: true });
-    f.render_widget(hints, hints_area);
 }
 
 // Whether every item of a category is packed; an empty category counts
@@ -343,24 +383,12 @@ fn draw_selected_items_panel(
     area: Rect,
     state: &mut AppDrawState,
 ) {
-    // The hint footer's height adapts to the panel width: entries are
-    // packed into as few rows as fit, so every binding stays visible.
-    // When the packed rows would squeeze the list below its minimum
-    // (spec 006, US5), the hints collapse to the single `? Help` line.
-    let entries = hint_entries(HintSurface::RightPanel);
-    let hint_lines = if hint_rows_fit_budget(entries, area.width as usize, 3) {
-        hint_rows(entries, area.width as usize)
-    } else {
-        vec![collapsed_hint_line()]
-    };
-    let hints_height = hint_lines.len() as u16;
-    let [title_area, list_area, hints_area, stats_area] = *Layout::default()
+    let [title_area, list_area, stats_area] = *Layout::default()
         .direction(Direction::Vertical)
         .margin(0)
         .constraints([
             Constraint::Length(1),
             Constraint::Min(10),
-            Constraint::Length(hints_height),
             Constraint::Length(5),
         ])
         .split(area)
@@ -389,38 +417,23 @@ fn draw_selected_items_panel(
         .filter(|(_, item)| item.selected)
         .collect();
 
-    // Cursor position within the panel's item rows (only when the right side is focused)
+    // Cursor position within the panel's rows (only when the right
+    // side is focused): the same tree the panel renders, so the
+    // cursor walks headers and items alike (spec 024)
     let current_row = if state.focus_side == FocusSide::Right {
         Some(state.selected_index)
     } else {
         None
     };
 
-    // Group selected items by category
-    let categories_map = group_items_by_category(selected_items.iter().copied(), |item| {
-        vec![item.primary_category().to_string()]
-    });
-
-    // Drawn rows: one header per category plus its items
-    let mut drawn_rows: Vec<PanelRow> = Vec::new();
-    for (category, items) in &categories_map {
-        drawn_rows.push(PanelRow::Category(category.clone()));
-        for (idx, _) in items {
-            drawn_rows.push(PanelRow::Item(*idx));
-        }
-    }
+    // The two-layer tree over the selected items (spec 024): the
+    // shared row model — the cursor and the renderer walk the same
+    // rows, so every header is reachable by navigation
+    let drawn_rows = state.right_rows();
     let total_rows = drawn_rows.len();
 
-    // Map the cursor (an item-only index) to its position among the drawn rows
-    let cursor_drawn_row = current_row.and_then(|cursor| {
-        let item_order = state.right_item_order();
-        let cursor_item = item_order.get(cursor).copied();
-        cursor_item.and_then(|item| {
-            drawn_rows
-                .iter()
-                .position(|r| matches!(r, PanelRow::Item(i) if *i == item))
-        })
-    });
+    // The cursor's position among the drawn rows (a direct row index)
+    let cursor_drawn_row = current_row.filter(|cursor| *cursor < total_rows);
 
     // Visible window: keep the cursor row in view, otherwise keep the current offset
     let viewport_height = list_area.height as usize;
@@ -435,12 +448,80 @@ fn draw_selected_items_panel(
         }
     }
     scroll = scroll.min(total_rows.saturating_sub(viewport_height));
+
+    // The visible slice with a sticky category header: no item is
+    // ever orphaned from its group when scrolled mid-category. The
+    // pin displaces the window's last row — when the cursor is on
+    // the displaced row, scroll one further so the cursor stays
+    // visible (repeated until it is, or the scroll maxes out).
+    let max_scroll = total_rows.saturating_sub(viewport_height);
+    let mut visible_rows = sticky_rows(&drawn_rows, scroll, viewport_height);
+    if let Some(cursor) = cursor_drawn_row {
+        while scroll > 0
+            && scroll < max_scroll
+            && drawn_rows.get(cursor).is_some()
+            && cursor >= scroll
+            && !visible_rows.iter().any(|(pos, _)| *pos == cursor)
+        {
+            scroll += 1;
+            visible_rows = sticky_rows(&drawn_rows, scroll, viewport_height);
+        }
+    }
     state.right_scroll = scroll;
 
-    for (row_index, row) in drawn_rows.iter().enumerate() {
-        let in_view = row_index >= scroll && row_index - scroll < viewport_height;
+    for (visible_index, (row_pos, row)) in visible_rows.iter().enumerate() {
+        let row_area = Rect {
+            x: list_area.x,
+            y: list_area.y + visible_index as u16,
+            width: list_area.width,
+            height: 1,
+        };
 
         match row {
+            PanelRow::Group(group) => {
+                // The top-layer header (spec 024): the packing
+                // indicator computed over every selected item under
+                // the group (any category whose top layer matches)
+                let packed_states: Vec<bool> = state
+                    .packing_list
+                    .items
+                    .iter()
+                    .filter(|item| {
+                        item.selected
+                            && item
+                                .categories
+                                .iter()
+                                .any(|c| category_layers(c).0 == group)
+                    })
+                    .map(|item| item.packed)
+                    .collect();
+                let all_packed = category_all_packed(&packed_states);
+                let (marker, marker_color) = if all_packed {
+                    ("✓ ", Color::Green)
+                } else {
+                    ("○ ", Color::Red)
+                };
+                let group_line = Line::from(vec![
+                    Span::raw(marker).fg(marker_color),
+                    Span::raw("▼ "),
+                    Span::raw(truncate_row_text(
+                        group,
+                        &format!("{marker}▼ "),
+                        "",
+                        list_area.width as usize,
+                    ))
+                    .bold()
+                    .fg(Color::Cyan),
+                ]);
+                let group_para =
+                    Paragraph::new(vec![group_line]).block(Block::default().borders(Borders::NONE));
+                f.render_widget(group_para, row_area);
+                // Highlight the group header the cursor is on
+                if cursor_drawn_row == Some(*row_pos) {
+                    let highlight = Block::default().style(Style::new().bg(Color::DarkGray));
+                    f.render_widget(highlight, row_area);
+                }
+            }
             PanelRow::Category(category) => {
                 // Packing indicator on the compiled list's category header:
                 // all-packed (✓ green) vs. partially packed (○ red)
@@ -460,10 +541,10 @@ fn draw_selected_items_panel(
 
                 let category_line = Line::from(vec![
                     Span::raw(marker).fg(marker_color),
-                    Span::raw("▼ "),
+                    Span::raw("  ▼ "),
                     Span::raw(truncate_row_text(
-                        category,
-                        &format!("{marker}▼ "),
+                        category_layers(category).1.unwrap_or(category),
+                        &format!("{marker}  ▼ "),
                         "",
                         list_area.width as usize,
                     ))
@@ -473,20 +554,16 @@ fn draw_selected_items_panel(
 
                 let category_para = Paragraph::new(vec![category_line])
                     .block(Block::default().borders(Borders::NONE));
-
-                if in_view {
-                    let category_area = Rect {
-                        x: list_area.x,
-                        y: list_area.y + (row_index - scroll) as u16,
-                        width: list_area.width,
-                        height: 1,
-                    };
-                    f.render_widget(category_para, category_area);
+                f.render_widget(category_para, row_area);
+                // Highlight the sub-category header the cursor is on
+                if cursor_drawn_row == Some(*row_pos) {
+                    let highlight = Block::default().style(Style::new().bg(Color::DarkGray));
+                    f.render_widget(highlight, row_area);
                 }
             }
             PanelRow::Item(item_index) => {
                 let item = &state.packing_list.items[*item_index];
-                let is_current = cursor_drawn_row == Some(row_index);
+                let is_current = cursor_drawn_row == Some(*row_pos);
 
                 let item_style = if is_current {
                     Style::new().fg(Color::Yellow).bg(Color::DarkGray)
@@ -518,16 +595,7 @@ fn draw_selected_items_panel(
 
                 let item_para =
                     Paragraph::new(vec![item_line]).block(Block::default().borders(Borders::NONE));
-
-                if in_view {
-                    let item_area = Rect {
-                        x: list_area.x,
-                        y: list_area.y + (row_index - scroll) as u16,
-                        width: list_area.width,
-                        height: 1,
-                    };
-                    f.render_widget(item_para, item_area);
-                }
+                f.render_widget(item_para, row_area);
             }
         }
     }
@@ -581,8 +649,4 @@ fn draw_selected_items_panel(
     ])
     .block(Block::default().borders(Borders::TOP));
     f.render_widget(stats, stats_area);
-
-    // Navigation hints: fixed footer row, always visible
-    let hints = Paragraph::new(hint_lines).wrap(Wrap { trim: true });
-    f.render_widget(hints, hints_area);
 }

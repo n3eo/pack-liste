@@ -2,7 +2,10 @@ use super::{test_item, test_state};
 use crate::ui::state::{InputField, InputMode, QuantityBufferKind};
 
 #[test]
-fn dialog_category_dropdown_moves_within_bounds() {
+fn dialog_up_down_do_not_touch_the_category_index() {
+    // Up/Down cycle the dialog's fields (the handler's job); the
+    // state's cursor methods leave dialog modes untouched — the
+    // category selection is adjusted with Left/Right only
     let mut state = test_state(Vec::new());
     state.input_mode = InputMode::AddingItem {
         field: InputField::Category,
@@ -17,32 +20,18 @@ fn dialog_category_dropdown_moves_within_bounds() {
         auto_quantity: true,
     };
     state.move_cursor_down();
-    match &state.input_mode {
-        InputMode::AddingItem { category_index, .. } => assert_eq!(*category_index, 1),
-        _ => panic!("expected AddingItem mode"),
-    }
     state.move_cursor_up();
-    state.move_cursor_up(); // below zero: stays at 0
     match &state.input_mode {
-        InputMode::AddingItem { category_index, .. } => assert_eq!(*category_index, 0),
-        _ => panic!("expected AddingItem mode"),
-    }
-    // Dropdown movement only applies when the category field is focused
-    state.input_mode = InputMode::AddingItem {
-        field: InputField::Name,
-        name: String::new(),
-        category: String::new(),
-        quantity: String::new(),
-        category_list: vec!["One".to_string(), "Two".to_string()],
-        category_index: 0,
-        rate: String::new(),
-        buffer_kind: QuantityBufferKind::None,
-        buffer_value: String::new(),
-        auto_quantity: true,
-    };
-    state.move_cursor_down();
-    match &state.input_mode {
-        InputMode::AddingItem { category_index, .. } => assert_eq!(*category_index, 0),
+        InputMode::AddingItem {
+            field,
+            category_index,
+            ..
+        } => {
+            // Neither the field nor the category index moved: the
+            // state's cursor methods are list-navigation only
+            assert_eq!(*field, InputField::Category);
+            assert_eq!(*category_index, 0);
+        }
         _ => panic!("expected AddingItem mode"),
     }
 }
@@ -311,5 +300,132 @@ fn dialog_quantity_typing_appends_after_stepping() {
     match &state.input_mode {
         InputMode::AddingItem { quantity, .. } => assert_eq!(quantity, "45"),
         _ => panic!("expected AddingItem mode"),
+    }
+}
+
+// ---- Category selection persists through the edit save ----
+
+#[test]
+fn cycling_category_updates_the_membership_set() {
+    // Left/Right in the Category field change the item's category:
+    // the membership set follows the highlight, so the change
+    // persists on save (the confirmation prefers the membership set)
+    let mut state = test_state(Vec::new());
+    state.input_mode = InputMode::EditingItem {
+        index: 0,
+        field: InputField::Category,
+        name: String::new(),
+        category: String::new(),
+        quantity: String::new(),
+        rate: String::new(),
+        buffer_kind: QuantityBufferKind::None,
+        buffer_value: String::new(),
+        auto_quantity: true,
+        category_list: vec!["One".to_string(), "Two".to_string(), "Three".to_string()],
+        category_index: 0,
+        selected_categories: vec!["One".to_string()],
+    };
+    state.cycle_category_selection(1);
+    match &state.input_mode {
+        InputMode::EditingItem {
+            category_index,
+            selected_categories,
+            ..
+        } => {
+            assert_eq!(*category_index, 1);
+            // The membership set follows the highlight
+            assert_eq!(selected_categories, &vec!["Two".to_string()]);
+        }
+        _ => panic!("expected EditingItem mode"),
+    }
+    state.cycle_category_selection(-1);
+    match &state.input_mode {
+        InputMode::EditingItem {
+            category_index,
+            selected_categories,
+            ..
+        } => {
+            assert_eq!(*category_index, 0);
+            assert_eq!(selected_categories, &vec!["One".to_string()]);
+        }
+        _ => panic!("expected EditingItem mode"),
+    }
+}
+
+#[test]
+fn cycled_category_persists_through_apply_item_edit() {
+    // The end-to-end contract: cycle the category, apply the edit —
+    // the item's categories are the cycled category, not the original
+    let mut state = test_state(vec![test_item("A", "One")]);
+    state.input_mode = InputMode::EditingItem {
+        index: 0,
+        field: InputField::Category,
+        name: "A".to_string(),
+        category: String::new(),
+        quantity: "1".to_string(),
+        rate: String::new(),
+        buffer_kind: QuantityBufferKind::None,
+        buffer_value: String::new(),
+        auto_quantity: true,
+        category_list: vec!["One".to_string(), "Two".to_string()],
+        category_index: 0,
+        selected_categories: vec!["One".to_string()],
+    };
+    state.cycle_category_selection(1);
+    // The save path: the membership set (now ["Two"]) is what applies
+    let categories = match &state.input_mode {
+        InputMode::EditingItem {
+            selected_categories,
+            ..
+        } => selected_categories.clone(),
+        _ => panic!("expected EditingItem mode"),
+    };
+    state.apply_item_edit(
+        0,
+        "A".to_string(),
+        categories,
+        "1".to_string(),
+        None,
+        String::new(),
+        QuantityBufferKind::None,
+        String::new(),
+    );
+    assert_eq!(
+        state.packing_list.items[0].categories,
+        vec!["Two".to_string()]
+    );
+}
+
+#[test]
+fn dialog_up_cycles_fields_backwards() {
+    // Up (prev) reverses the cycle: Name -> Buffer -> Rate -> Mode ->
+    // Quantity -> Category -> Name. Regression: prev() once
+    // returned self for every field, so Up did nothing.
+    let mut field = InputField::Name;
+    assert_eq!(field.prev(), InputField::Buffer);
+    field = field.prev();
+    assert_eq!(field, InputField::Buffer);
+    assert_eq!(field.prev(), InputField::Rate);
+    assert_eq!(InputField::Rate.prev(), InputField::Mode);
+    assert_eq!(InputField::Mode.prev(), InputField::Quantity);
+    assert_eq!(InputField::Quantity.prev(), InputField::Category);
+    assert_eq!(InputField::Category.prev(), InputField::Name);
+    // The full cycle round-trips: 6 prevs from Name return to Name
+    let mut f = InputField::Name;
+    for _ in 0..6 {
+        f = f.prev();
+    }
+    assert_eq!(f, InputField::Name);
+    // prev and next are inverses at every field
+    for f in [
+        InputField::Name,
+        InputField::Category,
+        InputField::Quantity,
+        InputField::Mode,
+        InputField::Rate,
+        InputField::Buffer,
+    ] {
+        assert_eq!(f.prev().next(), f, "prev/next must round-trip at {f:?}");
+        assert_eq!(f.next().prev(), f, "next/prev must round-trip at {f:?}");
     }
 }

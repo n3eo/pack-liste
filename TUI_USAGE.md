@@ -60,10 +60,10 @@ The welcome screen allows you to configure your trip parameters and the packing 
 
 | Key | Action |
 |-----|--------|
-| ↑/↓ | Move focus between fields |
+| ↑/↓ | Navigate between fields |
 | ←/→ | Adjust the focused value (weekdays ±1, cycle style/weather) |
 | +/- | Adjust weekdays |
-| Enter | Edit file name (on file field) / continue to main screen |
+| Enter | Continue (edit file name on the file field) |
 | F | Edit the trip file path |
 | Esc | Quit |
 
@@ -87,17 +87,22 @@ Long item names, categories, and file paths truncate with a visible `…` indica
 
 Press `F` on the main screen to toggle a fullscreen view of the compiled packing list. All compiled-list actions (navigate, toggle packed, recalculate) work there; `F` switches back. The view is presentation-only — quitting from fullscreen saves the trip exactly as from the two-panel view.
 
+### The Two-Layer Category Tree
+
+Categories are displayed as a two-level tree: every category string is split on the first ": " into a top-layer group and a sub-category. "Ausland: Karten" renders as the group "Ausland" with the indented sub-category "Karten" beneath it, and the items beneath that. Categories sharing a top layer appear under one group header; categories without the separator render as a group with their items directly beneath. The stored category strings are unchanged — the nesting is display-only.
+
 ### Left Panel: All Items
 
-- Shows all categories with their items
-- Categories can be **collapsed** (▶) or **expanded** (▼)
+- Shows the two-layer tree: group headers, indented sub-category headers, items
+- Both layers can be **collapsed** (▶) or **expanded** (▼): a group hides its whole sub-tree, a sub-category hides its items
+- `Ctrl+Space` on a group header selects/deselects everything beneath the group
 - Each item shows its selection state (✓ selected / ○ not selected), name, and quantity
 - All items are **preselected** by default on a new list
 
 ### Right Panel: Compiled Packing List
 
-- Shows the selected items grouped by category
-- Category headers show a packing indicator: ✓ (all packed) / ○ (partially packed)
+- Shows the selected items in the same two-layer tree
+- Group and sub-category headers show a packing indicator: ✓ (all packed) / ○ (partially packed)
 - Each item shows its packed state (✓ packed / ○ unpacked)
 - Shows statistics at the bottom (total, packed, unpacked, progress)
 
@@ -105,18 +110,18 @@ Press `F` on the main screen to toggle a fullscreen view of the compiled packing
 
 | Key | Action |
 |-----|--------|
-| ↑/↓ | Move the cursor through the focused panel's rows |
+| ↑/↓ | Navigate the focused panel's rows |
 | ←/→ | Nothing (no value to adjust on the main screen) |
-| Tab / Shift+Tab | Switch focus between panels |
-| Space | Toggle selection (left) / toggle packed (right) |
-| Ctrl+Space | Toggle the category's selection (left panel) |
+| Tab / Shift+Tab | Switch panel |
+| Space | Select the item (left) / Packed toggle (right) |
+| Ctrl+Space | Category: toggle the category's selection (left panel) |
 | C | Toggle collapse/expand of the category under the cursor |
 | A | Add a new item |
 | E | Edit the item under the cursor |
 | D | Delete the item under the cursor (with confirmation) |
-| R | Recalculate the current item (on a category header: its category) |
-| Ctrl+R | Recalculate the current item's category |
-| Ctrl+Shift+R | Recalculate every automatic item |
+| R | Recalc item: the current item (on a header: its scope — sub-category, or the whole group on a group header) |
+| Ctrl+R | Recalc category: the cursor's sub-category (the whole group on a group header) |
+| Ctrl+Shift+R | Recalc all: every automatic item |
 | ? | Help screen |
 | Esc | Quit |
 
@@ -124,11 +129,11 @@ Press `F` on the main screen to toggle a fullscreen view of the compiled packing
 
 | Key | Action |
 |-----|--------|
-| Tab | Cycle fields: Name → Category → Quantity → Mode → Name |
-| ↑/↓ | Move the category dropdown highlight (category field) |
-| ←/→ | Cycle the category selection (category field) |
-| Space | Toggle the quantity mode (Mode field) / toggle category membership (category field) |
-| Enter | Save |
+| Tab | Next field: Name → Category → Quantity → Mode → Rate → Buffer → Name |
+| ↑/↓ | Navigate fields |
+| ←/→ | Change the category (category field) / step the quantity ±1 (quantity field) |
+| Space | Toggle the focused field's value (Mode / Buffer / Category) |
+| Enter | Save (the edit dialog asks for confirmation) |
 | Esc | Cancel |
 
 ## Configuration Screen (O)
@@ -138,7 +143,7 @@ Manage travel style and weather modifiers.
 | Key | Action |
 |-----|--------|
 | Tab / Shift+Tab | Switch section (travel styles / weather) |
-| ↑/↓ | Move the modifier cursor |
+| ↑/↓ | Navigate the modifier list |
 | A | Add a modifier |
 | E | Edit the modifier under the cursor |
 | D | Delete the modifier under the cursor |
@@ -150,9 +155,9 @@ Edit the config file in-app.
 
 | Key | Action |
 |-----|--------|
-| ↑/↓/←/→ | Move the text cursor |
+| ↑/↓/←/→ | Navigate the text cursor |
 | Home/End | Cursor to line start / end |
-| Enter | Insert a new line |
+| Enter | New line: insert one |
 | Backspace | Delete backward |
 | Ctrl+S | Save and apply (validates YAML first) |
 | Esc | Discard edits and return |
