@@ -43,7 +43,7 @@ cargo run -- my-trip.yaml
 | Ctrl+E | Open the raw config file editor |
 | q | Quit (saves config and trip file) |
 | ? | Help screen (from Main and Welcome) |
-| O | Configuration screen (from any screen except Config/ConfigEditor) |
+| Ctrl+O | Configuration screen (from any screen except Config/ConfigEditor) |
 
 ## Screen 1: Welcome Screen
 

@@ -508,8 +508,11 @@ impl App {
             return Ok(false);
         }
 
-        // O opens the config screen from any screen except itself
-        if matches!(key.code, K::Char('o') | K::Char('O'))
+        // Ctrl+O opens the config screen from any screen except
+        // itself (spec 023 follow-up: the plain O collided with
+        // typing "o" in the dialogs' text fields)
+        if key.modifiers.contains(M::CONTROL)
+            && matches!(key.code, K::Char('o') | K::Char('O'))
             && !matches!(
                 self.draw_state.screen,
                 Screen::Config | Screen::ConfigEditor

@@ -43,7 +43,10 @@ pub(crate) fn help_content() -> Vec<Line<'static>> {
         entry("Ctrl+E", "Raw editor: open the raw config file editor"),
         quit_entry("q", "Quit (saves config and trip file)"),
         entry("?", "Help: show this screen (Main and Welcome)"),
-        entry("O", "Config: open the configuration screen (modifiers)"),
+        entry(
+            "Ctrl+O",
+            "Config: open the configuration screen (modifiers)",
+        ),
         blank(),
         section("WELCOME SCREEN:", Color::Yellow),
         entry(

@@ -51,7 +51,7 @@ pub(crate) mod bindings {
     pub(crate) const DELETE: (&str, &str) = ("D", "Delete");
     pub(crate) const COLLAPSE: (&str, &str) = ("C", "Collapse");
     pub(crate) const HELP: (&str, &str) = ("?", "Help");
-    pub(crate) const CONFIG: (&str, &str) = ("O", "Config");
+    pub(crate) const CONFIG: (&str, &str) = ("Ctrl+O", "Config");
     pub(crate) const RAW_EDITOR: (&str, &str) = ("Ctrl+E", "Raw editor");
     pub(crate) const SAVE_APPLY: (&str, &str) = ("Ctrl+S", "Save & apply");
     pub(crate) const QUIT: (&str, &str) = ("q", "Quit");
@@ -248,7 +248,7 @@ pub(crate) fn help_binding_tokens() -> Vec<&'static str> {
         "Ctrl+E",
         "q",
         "?",
-        "O",
+        "Ctrl+O",
         // Welcome
         "↑/↓",
         "←/→",

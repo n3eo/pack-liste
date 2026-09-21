@@ -41,7 +41,7 @@ fn help_screen_text_covers_all_handler_bindings() {
         "Ctrl+E",
         "q",
         "?",
-        "O",
+        "Ctrl+O",
         // Welcome
         "↑/↓",
         "←/→",
@@ -129,7 +129,7 @@ fn hint_entries_match_the_contract_binding_sets() {
                 ("+/-", "Weekdays"),
                 ("Enter", "Continue"),
                 ("F", "Edit path"),
-                ("O", "Config"),
+                ("Ctrl+O", "Config"),
                 ("Ctrl+E", "Raw editor"),
                 ("q", "Quit"),
             ],
