@@ -11,8 +11,8 @@ use crate::ui::hints::HintSurface;
 use crate::ui::state::{AppDrawState, ConfigSection, Focus, FocusSide, InputMode, Screen};
 use std::path::PathBuf;
 
-fn test_item(name: &str, category: &str) -> Item {
-    Item::new(name.to_string(), vec![category.to_string()], 1)
+fn test_item(name: &str, label: &str) -> Item {
+    Item::new(name.to_string(), vec![label.to_string()], 1)
 }
 
 fn test_state(items: Vec<Item>) -> AppDrawState {
@@ -28,8 +28,8 @@ fn test_state(items: Vec<Item>) -> AppDrawState {
         weather: "mixed".to_string(),
         modifiers: ModifiersConfig::default(),
         focus: Focus::TripFile,
-        collapsed_categories: Vec::new(),
-        collapsed_groups: Vec::new(),
+        collapsed_labels: Vec::new(),
+        occurrence_overrides: std::collections::BTreeMap::new(),
         selected_index: 0,
         focus_side: FocusSide::Left,
         fullscreen: false,

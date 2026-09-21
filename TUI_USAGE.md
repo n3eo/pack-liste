@@ -6,7 +6,7 @@ Pack-Liste is a terminal-based packing list application with dynamic quantity ca
 1. **Welcome Screen**: Configure trip parameters and the packing list file
 2. **Main Screen**: View and manage the packing list (all items left, compiled list right)
 3. **Help Screen** (`?`): Full navigation reference
-4. **Configuration Screen** (`O`): Manage travel style and weather modifiers
+4. **Configuration Screen** (`Ctrl+O`): Manage travel style and weather modifiers
 5. **Raw Config Editor** (`Ctrl+E`): Edit the config file in-app
 
 ## Running the Application
@@ -69,7 +69,7 @@ The welcome screen allows you to configure your trip parameters and the packing 
 
 ## Screen 2: Main Screen
 
-The main screen shows all items grouped by category on the left, and the compiled packing list on the right. Both panels show a navigation hint line at the bottom at every supported terminal size.
+The main screen shows all items grouped by label on the left, and the compiled packing list on the right. Both panels show a navigation hint line at the bottom at every supported terminal size.
 
 ### Terminal Sizes
 
@@ -81,30 +81,36 @@ The layout adapts to the terminal:
 | 40–79 columns (at least 24 rows) | Stacked: both panels full-width, one above the other |
 | Below 40 columns or 24 rows | A resize notice only — no data is lost; resize back to continue |
 
-Long item names, categories, and file paths truncate with a visible `…` indicator — nothing is cut off silently. When the full hint lines would squeeze the lists, they collapse to a single `? Help` line; `?` opens the help screen at every size. The same key bindings work at every size.
+Long item names, labels, and file paths truncate with a visible `…` indicator — nothing is cut off silently. The quantity always stays on the row: the name truncates first, then the label chips. When the full hint lines would squeeze the lists, they collapse to a single `? Help` line; `?` opens the help screen at every size. The same key bindings work at every size.
 
 ### Fullscreen Compiled List
 
 Press `F` on the main screen to toggle a fullscreen view of the compiled packing list. All compiled-list actions (navigate, toggle packed, recalculate) work there; `F` switches back. The view is presentation-only — quitting from fullscreen saves the trip exactly as from the two-panel view.
 
-### The Two-Layer Category Tree
+### Labels and the Flat Grouping
 
-Categories are displayed as a two-level tree: every category string is split on the first ": " into a top-layer group and a sub-category. "Ausland: Karten" renders as the group "Ausland" with the indented sub-category "Karten" beneath it, and the items beneath that. Categories sharing a top layer appear under one group header; categories without the separator render as a group with their items directly beneath. The stored category strings are unchanged — the nesting is display-only.
+Items are grouped by **labels** — a flat, single-level grouping. Every item carries one or more labels (plain strings, no hierarchy, no `": "` separator). The panels show one header per distinct label (sorted alphabetically), with the items carrying that label beneath it. An item with multiple labels appears under each of its labels' groups — it is still one item: one quantity, one edit, counted once in the statistics.
+
+Behind every item's name its labels render as small grey chips (e.g. ` [Ausland] [Karten]`): dark grey when the occurrence's toggle state matches the item's own, light grey when it differs.
+
+### Singletons
+
+A **singleton** is an item whose toggles are synchronized across all its labels: toggling it — selecting it for the trip, or marking it packed — under any of its labels flips it everywhere. This is the model for "one physical thing appearing in several groups" (one toothbrush listed under two labels is ONE toothbrush). A non-singleton item keeps independent toggle states per label occurrence: toggling it under one label changes only that occurrence, and the other labels' chips turn light grey to show the divergence.
 
 ### Left Panel: All Items
 
-- Shows the two-layer tree: group headers, indented sub-category headers, items
-- Both layers can be **collapsed** (▶) or **expanded** (▼): a group hides its whole sub-tree, a sub-category hides its items
-- `Ctrl+Space` on a group header selects/deselects everything beneath the group
-- Each item shows its selection state (✓ selected / ○ not selected), name, and quantity
+- Shows the flat label grouping: one header per label, the carrying items beneath
+- Labels can be **collapsed** (▶) or **expanded** (▼): a collapsed label hides its items
+- `Ctrl+Space` on a label header selects/deselects every item carrying that label
+- Each item shows its occurrence's selection state (✓ selected / ○ not selected), name, label chips, and quantity
 - All items are **preselected** by default on a new list
 
 ### Right Panel: Compiled Packing List
 
-- Shows the selected items in the same two-layer tree
-- Group and sub-category headers show a packing indicator: ✓ (all packed) / ○ (partially packed)
-- Each item shows its packed state (✓ packed / ○ unpacked)
-- Shows statistics at the bottom (total, packed, unpacked, progress)
+- Shows the selected items in the same flat label grouping
+- Label headers show a packing indicator: ✓ (all packed) / ○ (partially packed)
+- Each item shows its occurrence's packed state (✓ packed / ○ unpacked)
+- Shows statistics at the bottom (total, packed, unpacked, progress) — items are counted once, not per label occurrence
 
 ### Navigation
 
@@ -113,14 +119,14 @@ Categories are displayed as a two-level tree: every category string is split on 
 | ↑/↓ | Navigate the focused panel's rows |
 | ←/→ | Nothing (no value to adjust on the main screen) |
 | Tab / Shift+Tab | Switch panel |
-| Space | Select the item (left) / Packed toggle (right) |
-| Ctrl+Space | Category: toggle the category's selection (left panel) |
-| C | Toggle collapse/expand of the category under the cursor |
+| Space | Select the item occurrence (left) / Packed toggle (right) |
+| Ctrl+Space | Label: toggle the label's selection (left panel) |
+| C | Toggle collapse/expand of the label under the cursor |
 | A | Add a new item |
 | E | Edit the item under the cursor |
 | D | Delete the item under the cursor (with confirmation) |
-| R | Recalc item: the current item (on a header: its scope — sub-category, or the whole group on a group header) |
-| Ctrl+R | Recalc category: the cursor's sub-category (the whole group on a group header) |
+| R | Recalc item: the current item (on a label header: every item carrying that label) |
+| Ctrl+R | Recalc label: every item carrying the cursor's label |
 | Ctrl+Shift+R | Recalc all: every automatic item |
 | ? | Help screen |
 | Esc | Quit |
@@ -129,14 +135,16 @@ Categories are displayed as a two-level tree: every category string is split on 
 
 | Key | Action |
 |-----|--------|
-| Tab | Next field: Name → Category → Quantity → Mode → Rate → Buffer → Name |
+| Tab | Next field: Name → Labels → Singleton → Quantity → Mode → Rate → Buffer → Name |
 | ↑/↓ | Navigate fields |
-| ←/→ | Change the category (category field) / step the quantity ±1 (quantity field) |
-| Space | Toggle the focused field's value (Mode / Buffer / Category) |
+| ←/→ | Cycle the highlighted label (Labels field) / step the quantity ±1 (Quantity field) |
+| Space | Toggle the focused field's value (Labels: the highlighted label's membership / Singleton / Mode / Buffer) |
 | Enter | Save (the edit dialog asks for confirmation) |
 | Esc | Cancel |
 
-## Configuration Screen (O)
+The **Labels** field is a multi-select: the picker lists every existing label, `←/→` moves the highlight, `Space` toggles membership, and free text adds a new label. At least one label is required to save. The **Singleton** field (`Space` toggles yes/no) sets whether the item's toggles synchronize across all its labels.
+
+## Configuration Screen (Ctrl+O)
 
 Manage travel style and weather modifiers.
 
@@ -176,23 +184,46 @@ Edit the config file in-app.
 
 ### Managing Your Packing List
 
-1. Use **↑/↓** to navigate through categories and items
-2. Press **C** to collapse a category; **C** again to expand it
-3. Press **Space** on the left panel to toggle an item's selection
+1. Use **↑/↓** to navigate through labels and items
+2. Press **C** to collapse a label; **C** again to expand it
+3. Press **Space** on the left panel to toggle an item occurrence's selection
 4. Press **Tab** to switch to the right panel
-5. Press **Space** on the right panel to mark an item as packed (✓)
-6. Press **A** to add a new item (the current category is preselected)
+5. Press **Space** on the right panel to mark an item occurrence as packed (✓)
+6. Press **A** to add a new item (the cursor's label is preselected)
 7. Press **E** to edit the item under the cursor
 8. Press **D** to delete the item under the cursor (confirmation required)
 9. Press **R** to recalculate the current item, **Ctrl+R** for its
-   category, or **Ctrl+Shift+R** for everything. Quantities never
+   label, or **Ctrl+Shift+R** for everything. Quantities never
    change on their own: manual edits are authoritative, and only the
    recalculate keys recalculate (fixed items are never touched).
 10. Press **q** to quit when done (config and trip file are saved)
 
 ## Configuration
 
-The application configuration (items, categories, trip parameters, modifiers) is stored in `~/.config/pack-liste/config.yaml` as YAML. The compiled packing list is persisted to the packing list file path set on the welcome screen (or passed as the first argument), in a human-readable YAML format that can also be edited by hand.
+The application configuration (items, labels, trip parameters, modifiers) is stored in `~/.config/pack-liste/config.yaml` as YAML. The compiled packing list is persisted to the packing list file path set on the welcome screen (or passed as the first argument), in a human-readable YAML format that can also be edited by hand.
+
+An item in the config file:
+
+```yaml
+items:
+- name: Führerschein international
+  labels:
+  - Ausland
+  - Karten
+  singleton: true
+  auto_quantity: false
+  quantity: 1
+- name: T-Shirt
+  labels:
+  - Ausland
+  - Handgepäck
+  auto_quantity: true
+```
+
+- `labels`: one or more plain strings — the item's only grouping data; no `": "` separator, no hierarchy
+- `singleton`: optional (absent = false) — the item's toggles synchronize across all its labels
+- `quantity`: only present for fixed-quantity items (`auto_quantity: false`); automatic items are recalculated on every load
+- Duplicate entries (same name AND same labels) load as one item — the first occurrence wins; same name with different labels are distinct items
 
 ## Troubleshooting
 

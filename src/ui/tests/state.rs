@@ -59,33 +59,103 @@ fn item_selection_toggles() {
     let mut state = test_state(vec![test_item("A", "Cat")]);
     state.selected_index = 1; // cursor on item A
     assert!(state.packing_list.items[0].selected);
+    // Non-singleton (spec 025, FR-012): the toggle writes the
+    // per-occurrence override, not the item's own state
     state.toggle_item_selection();
+    assert!(!state.effective_selected(0, "Cat"));
+    assert!(state.packing_list.items[0].selected);
+    state.toggle_item_selection();
+    assert!(state.effective_selected(0, "Cat"));
+}
+
+#[test]
+fn singleton_selection_toggles_synchronize_across_labels() {
+    let mut item = test_item("A", "Cat");
+    item.labels.push("Other".to_string());
+    item.singleton = true;
+    let mut state = test_state(vec![item]);
+    // Toggle under the Cat occurrence (row 1 in the left panel)
+    state.selected_index = 1;
+    state.toggle_item_selection();
+    // The item's own state flipped (FR-011) — visible under both labels
     assert!(!state.packing_list.items[0].selected);
+    assert!(!state.effective_selected(0, "Cat"));
+    assert!(!state.effective_selected(0, "Other"));
+    // A pre-existing override is cleared by the synchronized toggle
+    state
+        .occurrence_overrides
+        .insert((0, "Other".to_string()), true);
     state.toggle_item_selection();
+    assert!(state.packing_list.items[0].selected);
+    assert!(state.effective_selected(0, "Other"));
+    assert!(state.occurrence_overrides.is_empty());
+}
+
+#[test]
+fn non_singleton_toggle_writes_only_that_occurrence() {
+    // FR-012: a non-singleton's toggle under one label writes the
+    // override; the other label's occurrence keeps the item's state
+    let mut item = test_item("A", "Alpha");
+    item.labels.push("Beta".to_string());
+    let mut state = test_state(vec![item]);
+    // Left rows: [Alpha header, A, Beta header, A]; toggle under Alpha
+    state.selected_index = 1;
+    state.toggle_item_selection();
+    assert!(
+        state.packing_list.items[0].selected,
+        "the item's own state is untouched"
+    );
+    assert!(
+        !state.effective_selected(0, "Alpha"),
+        "the Alpha occurrence flipped"
+    );
+    assert!(
+        state.effective_selected(0, "Beta"),
+        "the Beta occurrence keeps the item's state"
+    );
+    // The persisted save stores the item's own state only (US5)
     assert!(state.packing_list.items[0].selected);
 }
 
 #[test]
-fn category_selection_toggles_all_items_and_collapses() {
+fn singleton_packed_toggles_synchronize_across_labels() {
+    // FR-011 on the packed state (right panel): a singleton's packed
+    // toggle flips the item and both occurrences follow
+    let mut item = test_item("A", "Alpha");
+    item.labels.push("Beta".to_string());
+    item.singleton = true;
+    let mut state = test_state(vec![item]);
+    state.focus_side = FocusSide::Right;
+    // Right rows: [Alpha header, A, Beta header, A]; toggle under Alpha
+    state.selected_index = 1;
+    state.toggle_item_packed();
+    assert!(state.packing_list.items[0].packed);
+    assert!(state.effective_packed(0, "Alpha"));
+    assert!(state.effective_packed(0, "Beta"));
+    assert!(state.occurrence_overrides.is_empty());
+}
+
+#[test]
+fn label_selection_toggles_all_items_and_collapses() {
     let mut state = test_state(vec![
         test_item("A", "Cat"),
         test_item("B", "Cat"),
         test_item("C", "Other"),
     ]);
     state.selected_index = 0; // cursor on the Cat header
-    state.toggle_category_selection();
-    // Both Cat items deselected, Other untouched; category collapsed
+    state.toggle_label_selection();
+    // Both Cat items deselected, Other untouched; label collapsed
     assert!(!state.packing_list.items[0].selected);
     assert!(!state.packing_list.items[1].selected);
     assert!(state.packing_list.items[2].selected);
-    assert!(state.collapsed_categories.contains(&"Cat".to_string()));
+    assert!(state.collapsed_labels.contains(&"Cat".to_string()));
     // Cursor stays on the header row after collapsing
     assert_eq!(state.selected_index, 0);
     // Toggling back reselects and expands
-    state.toggle_category_selection();
+    state.toggle_label_selection();
     assert!(state.packing_list.items[0].selected);
     assert!(state.packing_list.items[1].selected);
-    assert!(!state.collapsed_categories.contains(&"Cat".to_string()));
+    assert!(!state.collapsed_labels.contains(&"Cat".to_string()));
 }
 
 #[test]
@@ -94,31 +164,148 @@ fn packed_toggles_only_on_right_side() {
     state.focus_side = FocusSide::Left;
     state.selected_index = 1;
     state.toggle_item_packed();
+    // Left side: packed is never toggled (spec 025, US5)
     assert!(!state.packing_list.items[0].packed);
-    // On the right side the rows are the tree (spec 024): the group
+    assert!(state.occurrence_overrides.is_empty());
+    // On the right side the rows are flat (spec 025): the label
     // header at row 0, the item beneath it at row 1
     state.focus_side = FocusSide::Right;
     state.selected_index = 1;
     state.toggle_item_packed();
-    assert!(state.packing_list.items[0].packed);
-    state.toggle_item_packed();
+    // Non-singleton: the override carries the packed state (FR-012)
     assert!(!state.packing_list.items[0].packed);
+    assert!(state.effective_packed(0, "Cat"));
+    state.toggle_item_packed();
+    assert!(!state.effective_packed(0, "Cat"));
 }
 
 #[test]
 fn collapse_moves_cursor_to_header() {
     let mut state = test_state(vec![test_item("A", "Cat"), test_item("B", "Cat")]);
     state.selected_index = 2; // cursor on item B
-    state.toggle_category_collapse();
-    assert!(state.collapsed_categories.contains(&"Cat".to_string()));
-    // Cursor moved to the group header (row 0 — "Cat" is
-    // separator-free, so it renders as a group with items directly
-    // beneath, spec 024)
+    state.toggle_label_collapse();
+    assert!(state.collapsed_labels.contains(&"Cat".to_string()));
+    // Cursor moved to the label header (row 0)
     assert_eq!(state.selected_index, 0);
     // Expanding keeps the cursor on the header
-    state.toggle_category_collapse();
-    assert!(!state.collapsed_categories.contains(&"Cat".to_string()));
+    state.toggle_label_collapse();
+    assert!(!state.collapsed_labels.contains(&"Cat".to_string()));
     assert_eq!(state.selected_index, 0);
+}
+
+#[test]
+fn flat_grouping_one_header_per_distinct_label_sorted() {
+    // FR-007: one Label header per distinct label (sorted), the
+    // carrying items beneath; a multi-label item appears under both
+    let mut multi = test_item("M", "Zebra");
+    multi.labels.push("Alpha".to_string());
+    let state = test_state(vec![test_item("A", "Zebra"), multi, test_item("B", "Mid")]);
+    let rows = state.left_rows();
+    // Headers sorted: Alpha, Mid, Zebra
+    let headers: Vec<String> = rows
+        .iter()
+        .filter_map(|r| match r {
+            PanelRow::Label(l) => Some(l.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(headers, vec!["Alpha", "Mid", "Zebra"]);
+    // The multi-label item M appears under both Alpha and Zebra
+    let mut current = String::new();
+    let mut m_under = Vec::new();
+    for row in &rows {
+        match row {
+            PanelRow::Label(l) => current = l.clone(),
+            PanelRow::Item(i) if state.packing_list.items[*i].name == "M" => {
+                m_under.push(current.clone())
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(m_under, vec!["Alpha", "Zebra"]);
+    // The right panel groups the same way over the selected items
+    let right = state.right_rows();
+    let right_headers: Vec<String> = right
+        .iter()
+        .filter_map(|r| match r {
+            PanelRow::Label(l) => Some(l.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(right_headers, vec!["Alpha", "Mid", "Zebra"]);
+}
+
+#[test]
+fn collapsed_label_hides_its_items_and_clamps_the_cursor() {
+    // FR-008: a collapsed label hides its items; the cursor clamps
+    // to the header
+    let mut state = test_state(vec![
+        test_item("A", "Alpha"),
+        test_item("B", "Alpha"),
+        test_item("C", "Beta"),
+    ]);
+    state.selected_index = 2; // cursor on item B (under Alpha)
+    state.toggle_label_collapse();
+    assert!(state.collapsed_labels.contains(&"Alpha".to_string()));
+    // Alpha's items are gone from the rows; Beta's remain
+    let rows = state.left_rows();
+    let names: Vec<&str> = rows
+        .iter()
+        .filter_map(|r| match r {
+            PanelRow::Item(i) => Some(state.packing_list.items[*i].name.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(names, vec!["C"]);
+    // The cursor sits on the Alpha header
+    assert!(matches!(&rows[state.selected_index], PanelRow::Label(l) if l == "Alpha"));
+}
+
+#[test]
+fn group_selection_flips_every_item_carrying_the_label() {
+    // FR-008: group-selection flips every item carrying the label
+    let mut state = test_state(vec![
+        test_item("A", "Alpha"),
+        test_item("B", "Alpha"),
+        test_item("C", "Beta"),
+    ]);
+    state.selected_index = 0; // the Alpha header
+    state.toggle_label_selection();
+    assert!(!state.packing_list.items[0].selected);
+    assert!(!state.packing_list.items[1].selected);
+    assert!(state.packing_list.items[2].selected);
+    state.toggle_label_selection();
+    assert!(state.packing_list.items[0].selected);
+    assert!(state.packing_list.items[1].selected);
+}
+
+#[test]
+fn group_recalc_covers_exactly_the_labels_items() {
+    // FR-008: group-recalc covers exactly the items carrying the
+    // label; the scope resolves from a Label header row
+    let mut a = test_item("A", "Alpha");
+    a.auto_quantity = true;
+    let mut b = test_item("B", "Alpha");
+    b.auto_quantity = true;
+    let mut c = test_item("C", "Beta");
+    c.auto_quantity = true;
+    let mut state = test_state(vec![a, b, c]);
+    state.weekdays = crate::models::weekdays::Weekdays::new(10).unwrap();
+    // The scope from the Alpha header row
+    state.selected_index = 0;
+    let scope = state.cursor_recalc_scope();
+    assert_eq!(scope, Some(RecalculateScope::Label("Alpha".to_string())));
+    // Recalculate the Alpha scope: A and B change, C untouched
+    let _ = state.recalculate_quantities_scoped(
+        &QuantityCalculation::new(),
+        RecalculateScope::Label("Alpha".to_string()),
+    );
+    let a_qty = state.packing_list.items[0].quantity;
+    let b_qty = state.packing_list.items[1].quantity;
+    let c_qty = state.packing_list.items[2].quantity;
+    assert_eq!(a_qty, 10);
+    assert_eq!(b_qty, 10);
+    assert_eq!(c_qty, 1);
 }
 
 #[test]
@@ -129,6 +316,7 @@ fn edit_save_keeps_empty_fields_and_parses_quantity() {
         0,
         String::new(),
         vec![],
+        false,
         "3".to_string(),
         None,
         String::new(),
@@ -136,13 +324,20 @@ fn edit_save_keeps_empty_fields_and_parses_quantity() {
         String::new(),
     );
     assert_eq!(state.packing_list.items[0].name, "A");
-    assert_eq!(state.packing_list.items[0].primary_category(), "Cat");
+    assert_eq!(
+        state.packing_list.items[0]
+            .labels
+            .first()
+            .map(String::as_str),
+        Some("Cat")
+    );
     assert_eq!(state.packing_list.items[0].quantity, 3);
     // An unparsable quantity keeps the old value
     state.apply_item_edit(
         0,
         "Renamed".to_string(),
         vec!["NewCat".to_string()],
+        false,
         "x".to_string(),
         None,
         String::new(),
@@ -150,13 +345,20 @@ fn edit_save_keeps_empty_fields_and_parses_quantity() {
         String::new(),
     );
     assert_eq!(state.packing_list.items[0].name, "Renamed");
-    assert_eq!(state.packing_list.items[0].primary_category(), "NewCat");
+    assert_eq!(
+        state.packing_list.items[0]
+            .labels
+            .first()
+            .map(String::as_str),
+        Some("NewCat")
+    );
     assert_eq!(state.packing_list.items[0].quantity, 3);
     // An out-of-range index is a no-op
     state.apply_item_edit(
         9,
         "X".to_string(),
         vec![],
+        false,
         String::new(),
         None,
         String::new(),
@@ -176,6 +378,7 @@ fn apply_edit_writes_mode_and_freezes_quantity_when_fixed() {
         0,
         String::new(),
         vec![],
+        false,
         String::new(),
         Some(false),
         String::new(),
@@ -189,6 +392,7 @@ fn apply_edit_writes_mode_and_freezes_quantity_when_fixed() {
         0,
         String::new(),
         vec![],
+        false,
         String::new(),
         Some(true),
         String::new(),
@@ -207,6 +411,7 @@ fn fixed_quantity_cannot_drop_below_one() {
         0,
         String::new(),
         vec![],
+        false,
         "0".to_string(),
         None,
         String::new(),
@@ -243,7 +448,7 @@ fn recalculate_updates_auto_and_preserves_fixed() {
     // Non-quantity state the action must not touch
     state.packing_list.items[0].selected = true;
     state.packing_list.items[0].packed = true;
-    state.collapsed_categories = vec!["Cat".to_string()];
+    state.collapsed_labels = vec!["Cat".to_string()];
 
     state
         .recalculate_quantities(&QuantityCalculation::new())
@@ -256,7 +461,7 @@ fn recalculate_updates_auto_and_preserves_fixed() {
     // Non-quantity state is untouched (SC-003)
     assert!(state.packing_list.items[0].selected);
     assert!(state.packing_list.items[0].packed);
-    assert_eq!(state.collapsed_categories, vec!["Cat".to_string()]);
+    assert_eq!(state.collapsed_labels, vec!["Cat".to_string()]);
 
     // Idempotent: a second run with unchanged inputs changes nothing
     state
@@ -264,75 +469,6 @@ fn recalculate_updates_auto_and_preserves_fixed() {
         .unwrap();
     assert_eq!(state.packing_list.items[0].quantity, 7);
     assert_eq!(state.packing_list.items[1].quantity, 3);
-}
-
-// ---- US6: multi-category items ----
-
-#[test]
-fn multi_category_item_appears_under_each_category() {
-    let mut item = test_item("A", "Cat");
-    item.categories = vec!["Cat".to_string(), "Gear".to_string()];
-    let state = test_state(vec![item]);
-    let rows = state.left_rows();
-    // The item appears under both category headers
-    let mut cat_positions = Vec::new();
-    let mut item_count = 0;
-    for (i, row) in rows.iter().enumerate() {
-        match row {
-            // "Cat" and "Gear" are separator-free: they render as
-            // group headers (spec 024, FR-003)
-            PanelRow::Group(g) => {
-                if g == "Cat" || g == "Gear" {
-                    cat_positions.push(i);
-                }
-            }
-            PanelRow::Category(_) => {}
-            PanelRow::Item(idx) => {
-                if state.packing_list.items[*idx].name == "A" {
-                    item_count += 1;
-                }
-            }
-        }
-    }
-    assert_eq!(cat_positions.len(), 2, "both category headers present");
-    assert_eq!(item_count, 2, "item shown under both headers");
-}
-
-#[test]
-fn multi_category_selection_is_shared() {
-    // One item, two memberships: toggling selection through either
-    // occurrence flips the item once, everywhere
-    let mut item = test_item("A", "Cat");
-    item.categories = vec!["Cat".to_string(), "Gear".to_string()];
-    let mut state = test_state(vec![item]);
-    // Cursor on the item under the Cat header (row 1)
-    state.selected_index = 1;
-    state.toggle_item_selection();
-    assert!(!state.packing_list.items[0].selected);
-    // The compiled list shows the item at most once (primary category)
-    let right: Vec<usize> = state
-        .right_rows()
-        .iter()
-        .filter_map(|r| match r {
-            PanelRow::Item(i) => Some(*i),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(right.len(), 0, "deselected item gone from compiled list");
-    // Reselect through the Gear occurrence
-    state.selected_index = 2; // Gear header is row 2, item row 3
-    state.selected_index = 3;
-    state.toggle_item_selection();
-    assert!(state.packing_list.items[0].selected);
-    let right: Vec<usize> = state
-        .right_rows()
-        .iter()
-        .filter_map(|r| match r {
-            PanelRow::Item(i) => Some(*i),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(right.len(), 1, "item appears once in compiled list");
 }
 
 // ---- US5 (spec 022): the status line ----
@@ -424,6 +560,7 @@ fn apply_edit_writes_rate_and_reserve() {
         0,
         String::new(),
         vec![],
+        false,
         String::new(),
         None,
         "0.15".to_string(),
@@ -444,6 +581,7 @@ fn apply_edit_writes_multiplier_buffer() {
         0,
         String::new(),
         vec![],
+        false,
         String::new(),
         None,
         String::new(),
@@ -465,6 +603,7 @@ fn invalid_rate_is_rejected() {
         0,
         String::new(),
         vec![],
+        false,
         String::new(),
         None,
         "20.0".to_string(), // too big
@@ -476,6 +615,7 @@ fn invalid_rate_is_rejected() {
         0,
         String::new(),
         vec![],
+        false,
         String::new(),
         None,
         "0.01".to_string(), // too small
@@ -494,6 +634,7 @@ fn invalid_buffer_values_are_rejected() {
         0,
         String::new(),
         vec![],
+        false,
         String::new(),
         None,
         String::new(),
@@ -508,6 +649,7 @@ fn invalid_buffer_values_are_rejected() {
         0,
         String::new(),
         vec![],
+        false,
         String::new(),
         None,
         String::new(),
@@ -528,6 +670,7 @@ fn buffer_kind_none_clears_the_buffer() {
         0,
         String::new(),
         vec![],
+        false,
         String::new(),
         None,
         String::new(),
@@ -579,7 +722,7 @@ fn recalculate_category_scope_changes_only_that_category() {
     state
         .recalculate_quantities_scoped(
             &QuantityCalculation::new(),
-            RecalculateScope::Category("Cat".to_string()),
+            RecalculateScope::Label("Cat".to_string()),
         )
         .unwrap();
     assert_eq!(state.packing_list.items[0].quantity, 7);
@@ -633,13 +776,13 @@ fn recalculate_scope_touches_no_other_state() {
     a.packed = true;
     a.selected = false;
     let mut state = test_state(vec![a]);
-    state.collapsed_categories = vec!["Cat".to_string()];
+    state.collapsed_labels = vec!["Cat".to_string()];
     state
         .recalculate_quantities_scoped(&QuantityCalculation::new(), RecalculateScope::All)
         .unwrap();
     assert!(state.packing_list.items[0].packed);
     assert!(!state.packing_list.items[0].selected);
-    assert_eq!(state.collapsed_categories, vec!["Cat".to_string()]);
+    assert_eq!(state.collapsed_labels, vec!["Cat".to_string()]);
 }
 
 #[test]
@@ -669,7 +812,8 @@ fn add_with_quantity_5_creates_item_with_5() {
     let mut state = test_state(Vec::new());
     state.add_item_from_dialog(
         "Towel".to_string(),
-        "Cat".to_string(),
+        vec!["Cat".to_string()],
+        false,
         "5".to_string(),
         true,
         String::new(),
@@ -690,7 +834,8 @@ fn add_with_empty_quantity_creates_item_with_1() {
     let mut state = test_state(Vec::new());
     state.add_item_from_dialog(
         "Towel".to_string(),
-        "Cat".to_string(),
+        vec!["Cat".to_string()],
+        false,
         String::new(),
         true,
         String::new(),
@@ -705,7 +850,8 @@ fn add_fixed_quantity_survives_scoped_recalculate() {
     let mut state = test_state(Vec::new());
     state.add_item_from_dialog(
         "Towel".to_string(),
-        "Cat".to_string(),
+        vec!["Cat".to_string()],
+        false,
         "3".to_string(),
         false,
         String::new(),
@@ -724,7 +870,8 @@ fn add_automatic_quantity_recalculates_on_explicit_key() {
     let mut state = test_state(Vec::new());
     state.add_item_from_dialog(
         "Towel".to_string(),
-        "Cat".to_string(),
+        vec!["Cat".to_string()],
+        false,
         "3".to_string(),
         true,
         String::new(),
@@ -747,10 +894,12 @@ fn add_and_edit_dialog_variants_carry_the_same_field_set() {
     let add = InputMode::AddingItem {
         field: InputField::Name,
         name: "Towel".to_string(),
-        category: String::new(),
+        label_input: String::new(),
         quantity: "3".to_string(),
-        category_list: vec!["Cat".to_string()],
-        category_index: 0,
+        label_list: vec!["Cat".to_string()],
+        label_index: 0,
+        selected_labels: vec!["Cat".to_string()],
+        singleton: false,
         rate: String::new(),
         buffer_kind: QuantityBufferKind::None,
         buffer_value: String::new(),
@@ -760,25 +909,27 @@ fn add_and_edit_dialog_variants_carry_the_same_field_set() {
         index: 0,
         field: InputField::Name,
         name: "Towel".to_string(),
-        category: String::new(),
+        label_input: String::new(),
         quantity: "3".to_string(),
         rate: String::new(),
         buffer_kind: QuantityBufferKind::None,
         buffer_value: String::new(),
         auto_quantity: true,
-        category_list: vec!["Cat".to_string()],
-        category_index: 0,
-        selected_categories: vec!["Cat".to_string()],
+        label_list: vec!["Cat".to_string()],
+        label_index: 0,
+        selected_labels: vec!["Cat".to_string()],
+        singleton: false,
     };
     let add_fields = add.popup_fields().expect("add dialog has fields");
     let edit_fields = edit.popup_fields().expect("edit dialog has fields");
     // The shared surface carries the same values from both variants
     assert_eq!(add_fields.field, edit_fields.field);
     assert_eq!(add_fields.name, edit_fields.name);
-    assert_eq!(add_fields.category, edit_fields.category);
+    assert_eq!(add_fields.label_input, edit_fields.label_input);
     assert_eq!(add_fields.quantity, edit_fields.quantity);
     assert_eq!(add_fields.auto_quantity, edit_fields.auto_quantity);
-    assert_eq!(add_fields.category_index, edit_fields.category_index);
+    assert_eq!(add_fields.label_index, edit_fields.label_index);
+    assert_eq!(add_fields.singleton, edit_fields.singleton);
     assert_eq!(add_fields.rate, edit_fields.rate);
     assert_eq!(add_fields.buffer_kind, edit_fields.buffer_kind);
     assert_eq!(add_fields.buffer_value, edit_fields.buffer_value);
@@ -800,7 +951,8 @@ fn confirm_edit_snapshot_carries_the_dialogs_values() {
     let pending = PendingEdit {
         index: 0,
         name: "Towel".to_string(),
-        categories: vec!["Cat".to_string(), "Gear".to_string()],
+        labels: vec!["Cat".to_string(), "Gear".to_string()],
+        singleton: true,
         quantity: "5".to_string(),
         auto_quantity: false,
         rate: "1.5".to_string(),
@@ -808,10 +960,8 @@ fn confirm_edit_snapshot_carries_the_dialogs_values() {
         buffer_value: "2".to_string(),
     };
     assert_eq!(pending.name, "Towel");
-    assert_eq!(
-        pending.categories,
-        vec!["Cat".to_string(), "Gear".to_string()]
-    );
+    assert!(pending.singleton);
+    assert_eq!(pending.labels, vec!["Cat".to_string(), "Gear".to_string()]);
     assert_eq!(pending.quantity, "5");
     assert!(!pending.auto_quantity);
     assert_eq!(pending.rate, "1.5");
@@ -826,7 +976,8 @@ fn confirm_edit_applies_the_snapshot_on_confirm() {
     let pending = PendingEdit {
         index: 0,
         name: "New".to_string(),
-        categories: vec!["Cat".to_string()],
+        labels: vec!["Cat".to_string()],
+        singleton: false,
         quantity: "5".to_string(),
         auto_quantity: false,
         rate: String::new(),
@@ -838,7 +989,8 @@ fn confirm_edit_applies_the_snapshot_on_confirm() {
     state.apply_item_edit(
         pending.index,
         pending.name,
-        pending.categories,
+        pending.labels,
+        pending.singleton,
         pending.quantity,
         Some(pending.auto_quantity),
         pending.rate,
@@ -859,7 +1011,8 @@ fn confirm_edit_cancel_discards_the_snapshot() {
     let _pending = PendingEdit {
         index: 0,
         name: "New".to_string(),
-        categories: vec!["Cat".to_string()],
+        labels: vec!["Cat".to_string()],
+        singleton: false,
         quantity: "9".to_string(),
         auto_quantity: true,
         rate: String::new(),
@@ -883,7 +1036,8 @@ fn confirm_edit_mode_is_a_distinct_input_mode() {
         pending: PendingEdit {
             index: 0,
             name: "X".to_string(),
-            categories: vec!["Cat".to_string()],
+            labels: vec!["Cat".to_string()],
+            singleton: false,
             quantity: "1".to_string(),
             auto_quantity: true,
             rate: String::new(),
@@ -1023,35 +1177,35 @@ fn sticky_rows_pin_the_orphaned_category_header() {
     // enough that a mid-list window does not end at the list's end
     // (the pin is skipped there; the last row stays visible)
     let rows = vec![
-        PanelRow::Category("A".to_string()),
+        PanelRow::Label("A".to_string()),
         PanelRow::Item(0),
         PanelRow::Item(1),
-        PanelRow::Category("B".to_string()),
+        PanelRow::Label("B".to_string()),
         PanelRow::Item(2),
         PanelRow::Item(3),
-        PanelRow::Category("C".to_string()),
+        PanelRow::Label("C".to_string()),
         PanelRow::Item(4),
         PanelRow::Item(5),
     ];
     // Scroll 0: the plain window, unchanged
     let visible = sticky_rows(&rows, 0, 3);
     assert_eq!(visible.len(), 3);
-    assert!(matches!(visible[0].1, PanelRow::Category(_)));
+    assert!(matches!(visible[0].1, PanelRow::Label(_)));
     // Scroll 1 (starts mid-A): the header is pinned to the top
     let visible = sticky_rows(&rows, 1, 3);
-    assert!(matches!(&visible[0].1, PanelRow::Category(c) if c == "A"));
+    assert!(matches!(&visible[0].1, PanelRow::Label(c) if c == "A"));
     assert!(matches!(visible[1].1, PanelRow::Item(0)));
     assert!(matches!(visible[2].1, PanelRow::Item(1)));
     // The pinned header keeps its original position (0)
     assert_eq!(visible[0].0, 0);
     // Scroll 4 (starts on b1, mid-B): B's header is pinned
     let visible = sticky_rows(&rows, 4, 2);
-    assert!(matches!(&visible[0].1, PanelRow::Category(c) if c == "B"));
+    assert!(matches!(&visible[0].1, PanelRow::Label(c) if c == "B"));
     assert!(matches!(visible[1].1, PanelRow::Item(2)));
     assert_eq!(visible[0].0, 3);
     // Scroll onto a header row: no pinning needed
     let visible = sticky_rows(&rows, 3, 2);
-    assert!(matches!(&visible[0].1, PanelRow::Category(c) if c == "B"));
+    assert!(matches!(&visible[0].1, PanelRow::Label(c) if c == "B"));
     assert!(matches!(visible[1].1, PanelRow::Item(2)));
 }
 
@@ -1059,288 +1213,18 @@ fn sticky_rows_pin_the_orphaned_category_header() {
 fn sticky_rows_never_exceed_the_viewport() {
     use crate::ui::state::sticky_rows;
     let rows = vec![
-        PanelRow::Category("A".to_string()),
+        PanelRow::Label("A".to_string()),
         PanelRow::Item(0),
         PanelRow::Item(1),
+        PanelRow::Item(2),
     ];
     // Viewport 2, scroll 1: pinned header + one item = 2 rows
     let visible = sticky_rows(&rows, 1, 2);
     assert_eq!(visible.len(), 2);
-    // Viewport 1, scroll 1: the pin replaces the single row
-    let visible = sticky_rows(&rows, 1, 1);
+    // Viewport 1, scroll 2: the pin replaces the single row
+    let visible = sticky_rows(&rows, 2, 1);
     assert_eq!(visible.len(), 1);
-    assert!(matches!(visible[0].1, PanelRow::Category(_)));
-}
-
-// ---- Spec 024: the two-layer category nesting ----
-
-#[test]
-fn category_split_uses_the_first_separator() {
-    use crate::models::item::category_layers;
-    // The user's example: group + sub-category
-    assert_eq!(
-        category_layers("Ausland: Karten"),
-        ("Ausland", Some("Karten"))
-    );
-    // Only the FIRST separator splits; the rest stays verbatim
-    assert_eq!(category_layers("A: B: C"), ("A", Some("B: C")));
-    // Separator-free: the whole string is the top layer, no sub-layer
-    assert_eq!(category_layers("OhneTrenner"), ("OhneTrenner", None));
-    // A group with a single same-named sub-category
-    assert_eq!(
-        category_layers("Kulturbeutel: Kulturbeutel"),
-        ("Kulturbeutel", Some("Kulturbeutel"))
-    );
-    // The input is never rewritten (borrowed, verbatim)
-    let original = "Ausland: Karten".to_string();
-    let (top, sub) = category_layers(&original);
-    assert_eq!(top, "Ausland");
-    assert_eq!(sub, Some("Karten"));
-    assert_eq!(original, "Ausland: Karten");
-}
-
-#[test]
-fn two_layer_rows_group_shared_top_layers() {
-    // Categories sharing a top layer produce ONE group row followed
-    // by their sub-category rows (the user's example)
-    let mut a = test_item("Führerschein", "Ausland: Karten");
-    a.categories = vec!["Ausland: Karten".to_string()];
-    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
-    b.categories = vec!["Ausland: Handgepäck".to_string()];
-    let state = test_state(vec![a, b]);
-    let rows = state.left_rows();
-    // Expected (sorted): Group(Ausland), Category(Ausland: Handgepäck),
-    // item, Category(Ausland: Karten), item
-    let kinds: Vec<&PanelRow> = rows.iter().collect();
-    assert!(
-        matches!(&kinds[0], PanelRow::Group(g) if g == "Ausland"),
-        "one shared group header"
-    );
-    assert!(matches!(&kinds[1], PanelRow::Category(c) if c == "Ausland: Handgepäck"));
-    assert!(matches!(kinds[2], PanelRow::Item(1)));
-    assert!(matches!(&kinds[3], PanelRow::Category(c) if c == "Ausland: Karten"));
-    assert!(matches!(kinds[4], PanelRow::Item(0)));
-    // Exactly one group row for the two categories
-    let group_count = rows
-        .iter()
-        .filter(|r| matches!(r, PanelRow::Group(g) if g == "Ausland"))
-        .count();
-    assert_eq!(group_count, 1);
-}
-
-#[test]
-fn two_layer_rows_separator_free_categories_have_no_sub_row() {
-    // A separator-free category renders as a group with its items
-    // directly beneath (FR-003)
-    let state = test_state(vec![test_item("A", "Cat"), test_item("B", "Cat")]);
-    let rows = state.left_rows();
-    assert!(matches!(&rows[0], PanelRow::Group(g) if g == "Cat"));
-    // No Category row: the items sit directly beneath the group
-    assert!(matches!(rows[1], PanelRow::Item(0)));
-    assert!(matches!(rows[2], PanelRow::Item(1)));
-    assert!(!rows.iter().any(|r| matches!(r, PanelRow::Category(_))));
-}
-
-#[test]
-fn group_collapse_hides_the_whole_sub_tree() {
-    // Collapsing a group hides its sub-categories and items; the
-    // cursor stays on the group header (FR-005)
-    let mut a = test_item("Führerschein", "Ausland: Karten");
-    a.categories = vec!["Ausland: Karten".to_string()];
-    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
-    b.categories = vec!["Ausland: Handgepäck".to_string()];
-    let mut state = test_state(vec![a, b]);
-    // Cursor on the group header (row 0)
-    state.selected_index = 0;
-    state.toggle_category_collapse();
-    assert!(state.collapsed_groups.contains(&"Ausland".to_string()));
-    // Only the group row remains for the whole group
-    let rows = state.left_rows();
-    assert_eq!(rows.len(), 1);
-    assert!(matches!(&rows[0], PanelRow::Group(g) if g == "Ausland"));
-    assert_eq!(state.selected_index, 0);
-    // Expanding restores the tree
-    state.toggle_category_collapse();
-    assert!(!state.collapsed_groups.contains(&"Ausland".to_string()));
-    assert_eq!(state.left_rows().len(), 5);
-}
-
-#[test]
-fn sub_category_collapse_hides_only_its_items() {
-    // Collapsing a sub-category hides its items only; the sibling
-    // sub-category and the group header remain (FR-005)
-    let mut a = test_item("Führerschein", "Ausland: Karten");
-    a.categories = vec!["Ausland: Karten".to_string()];
-    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
-    b.categories = vec!["Ausland: Handgepäck".to_string()];
-    let mut state = test_state(vec![a, b]);
-    // Cursor on the Karten sub-category header (row 3 in sorted
-    // order: Group, Handgepäck, item, Karten)
-    state.selected_index = 3;
-    state.toggle_category_collapse();
-    assert!(
-        state
-            .collapsed_categories
-            .contains(&"Ausland: Karten".to_string())
-    );
-    let rows = state.left_rows();
-    // Group + Handgepäck header + item + Karten header (no items)
-    assert_eq!(rows.len(), 4);
-    assert!(matches!(&rows[1], PanelRow::Category(c) if c == "Ausland: Handgepäck"));
-    assert!(matches!(&rows[3], PanelRow::Category(c) if c == "Ausland: Karten"));
-    // The cursor stays on the collapsed header
-    assert_eq!(state.selected_index, 3);
-}
-
-#[test]
-fn group_selection_flips_every_item_under_the_group() {
-    // Ctrl+Space on a group header selects/deselects every item whose
-    // any category's top layer matches (FR-006)
-    let mut a = test_item("Führerschein", "Ausland: Karten");
-    a.categories = vec!["Ausland: Karten".to_string()];
-    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
-    b.categories = vec!["Ausland: Handgepäck".to_string()];
-    let other = test_item("Pass", "Dokumente_Karte: Dokumente/Karten");
-    let mut state = test_state(vec![a, b, other]);
-    // Cursor on the Ausland group header (row 0)
-    state.selected_index = 0;
-    state.toggle_category_selection();
-    // Both Ausland items deselected; the other group untouched
-    assert!(!state.packing_list.items[0].selected);
-    assert!(!state.packing_list.items[1].selected);
-    assert!(state.packing_list.items[2].selected);
-    // Toggling back reselects
-    state.toggle_category_selection();
-    assert!(state.packing_list.items[0].selected);
-    assert!(state.packing_list.items[1].selected);
-}
-
-#[test]
-fn group_recalc_scope_covers_the_group_only() {
-    // The group recalculate scope covers every item under the group
-    // and nothing else (FR-010)
-    let mut a = test_item("Führerschein", "Ausland: Karten");
-    a.categories = vec!["Ausland: Karten".to_string()];
-    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
-    b.categories = vec!["Ausland: Handgepäck".to_string()];
-    let other = test_item("Pass", "Dokumente_Karte: Dokumente/Karten");
-    let mut state = test_state(vec![a, b, other]);
-    // Stale values everywhere
-    for item in &mut state.packing_list.items {
-        item.quantity = 99;
-    }
-    state
-        .recalculate_quantities_scoped(
-            &QuantityCalculation::new(),
-            RecalculateScope::Group("Ausland".to_string()),
-        )
-        .unwrap();
-    // Both Ausland items recalculated (7 days x 1.0 x 1.0); the
-    // other group untouched
-    assert_eq!(state.packing_list.items[0].quantity, 7);
-    assert_eq!(state.packing_list.items[1].quantity, 7);
-    assert_eq!(state.packing_list.items[2].quantity, 99);
-}
-
-#[test]
-fn cursor_recalc_scope_resolves_by_row() {
-    // The cursor's recalculate scope follows the row: Group → the
-    // group, Category → the sub-category, Item → the item
-    let mut a = test_item("Führerschein", "Ausland: Karten");
-    a.categories = vec!["Ausland: Karten".to_string()];
-    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
-    b.categories = vec!["Ausland: Handgepäck".to_string()];
-    let state = test_state(vec![a, b]);
-    // Row 0: the group header
-    assert_eq!(
-        state.cursor_recalc_scope(),
-        Some(RecalculateScope::Group("Ausland".to_string()))
-    );
-    // Row 1: the Handgepäck sub-category header (sorted first)
-    let mut s = state.clone();
-    s.selected_index = 1;
-    assert_eq!(
-        s.cursor_recalc_scope(),
-        Some(RecalculateScope::Category(
-            "Ausland: Handgepäck".to_string()
-        ))
-    );
-    // Row 2: the Handgepäck item
-    let mut s = state.clone();
-    s.selected_index = 2;
-    assert_eq!(s.cursor_recalc_scope(), Some(RecalculateScope::Item(1)));
-}
-
-#[test]
-fn sticky_rows_pin_the_group_when_it_scrolls_off() {
-    use crate::ui::state::sticky_rows;
-    // A window starting on a sub-category header whose group header
-    // is off-screen pins the group header (FR-009)
-    let rows = vec![
-        PanelRow::Group("Ausland".to_string()),
-        PanelRow::Category("Ausland: Karten".to_string()),
-        PanelRow::Item(0),
-        PanelRow::Item(1),
-        PanelRow::Category("Ausland: Handgepäck".to_string()),
-        PanelRow::Item(2),
-        PanelRow::Group("Technik".to_string()),
-        PanelRow::Item(3),
-    ];
-    // Scroll 4 (starts on the Handgepäck header): the group is
-    // off-screen above → pinned (the window ends mid-list, so the
-    // pin displaces its last row without hiding the list's end)
-    let visible = sticky_rows(&rows, 4, 2);
-    assert!(matches!(&visible[0].1, PanelRow::Group(g) if g == "Ausland"));
-    assert!(matches!(&visible[1].1, PanelRow::Category(c) if c == "Ausland: Handgepäck"));
-    assert_eq!(visible[0].0, 0);
-    // Scroll 2 (starts on an item): the nearest off-screen header is
-    // the Karten sub-category → pinned
-    let visible = sticky_rows(&rows, 2, 2);
-    assert!(matches!(&visible[0].1, PanelRow::Category(c) if c == "Ausland: Karten"));
-    assert!(matches!(visible[1].1, PanelRow::Item(0)));
-}
-
-#[test]
-fn right_cursor_walks_the_tree_including_headers() {
-    // Regression (spec 024): the right panel's cursor walks the same
-    // tree it renders — group and sub-category headers are reachable
-    // rows, so scrolling up reaches the very top (the group header),
-    // not just the first item.
-    let mut a = test_item("Führerschein", "Ausland: Karten");
-    a.categories = vec!["Ausland: Karten".to_string()];
-    let mut b = test_item("T-Shirt", "Ausland: Handgepäck");
-    b.categories = vec!["Ausland: Handgepäck".to_string()];
-    let mut state = test_state(vec![a, b]);
-    state.focus_side = FocusSide::Right;
-    // The right rows: Group(Ausland), Category(Handgepäck), item,
-    // Category(Karten), item (sorted order)
-    let rows = state.right_rows();
-    assert_eq!(rows.len(), 5);
-    assert!(matches!(&rows[0], PanelRow::Group(g) if g == "Ausland"));
-    // The cursor starts at the group header and walks every row
-    assert_eq!(state.selected_index, 0);
-    state.move_cursor_down();
-    assert_eq!(state.selected_index, 1);
-    assert!(matches!(
-        state.active_rows()[state.selected_index],
-        PanelRow::Category(_)
-    ));
-    state.move_cursor_down();
-    assert!(matches!(
-        state.active_rows()[state.selected_index],
-        PanelRow::Item(_)
-    ));
-    // Walking up from the first item reaches the headers and the top
-    state.move_cursor_up();
-    state.move_cursor_up();
-    assert_eq!(state.selected_index, 0);
-    assert!(matches!(
-        state.active_rows()[state.selected_index],
-        PanelRow::Group(_)
-    ));
-    // Up at the top stays at the top
-    state.move_cursor_up();
-    assert_eq!(state.selected_index, 0);
+    assert!(matches!(visible[0].1, PanelRow::Label(_)));
 }
 
 #[test]
@@ -1350,8 +1234,8 @@ fn sticky_rows_never_hide_the_last_row_at_the_list_end() {
     // row — the pin must NOT displace it (the last item stays
     // visible; the header context yields).
     let rows = vec![
-        PanelRow::Group("Ausland".to_string()),
-        PanelRow::Category("Ausland: Karten".to_string()),
+        PanelRow::Label("Ausland".to_string()),
+        PanelRow::Label("Karten".to_string()),
         PanelRow::Item(0),
         PanelRow::Item(1),
         PanelRow::Item(2),
@@ -1364,8 +1248,62 @@ fn sticky_rows_never_hide_the_last_row_at_the_list_end() {
     assert!(matches!(visible[2].1, PanelRow::Item(2)));
     assert_eq!(visible[2].0, 4);
     // Mid-list (window ends before the list's end): the pin works —
-    // a window starting on the Category row pins its Group header
-    let visible = sticky_rows(&rows, 1, 3);
-    assert!(matches!(&visible[0].1, PanelRow::Group(g) if g == "Ausland"));
-    assert!(matches!(visible[1].1, PanelRow::Category(_)));
+    // a window starting on an Item pins its nearest off-screen label
+    let visible = sticky_rows(&rows, 2, 2);
+    assert!(matches!(&visible[0].1, PanelRow::Label(l) if l == "Karten"));
+    assert_eq!(visible[0].0, 1);
+    assert!(matches!(visible[1].1, PanelRow::Item(0)));
+}
+
+// ---- Spec 025, US5: the chip model (FR-013, SC-009) ----
+
+#[test]
+fn chips_are_dark_when_the_occurrence_matches_and_light_when_it_differs() {
+    use crate::ui::screens::main::label_chip_spans;
+    use ratatui::style::Color;
+
+    // A non-singleton with two labels; the Alpha occurrence is
+    // overridden away from the item's own state
+    let mut item = test_item("A", "Alpha");
+    item.labels.push("Beta".to_string());
+    let mut state = test_state(vec![item]);
+    state
+        .occurrence_overrides
+        .insert((0, "Alpha".to_string()), false);
+
+    // Rendered under the Beta header: the Alpha chip differs (light
+    // grey), the Beta chip matches (dark grey)
+    let spans = label_chip_spans(&state, 0, "Beta", true);
+    assert_eq!(spans.len(), 2);
+    assert_eq!(spans[0].content, " [Alpha]");
+    assert_eq!(spans[0].style.fg, Some(Color::Gray));
+    assert_eq!(spans[1].content, " [Beta]");
+    assert_eq!(spans[1].style.fg, Some(Color::DarkGray));
+
+    // Rendered under the Alpha header (the row shows the overridden
+    // state): the Alpha occurrence differs from the item's own state,
+    // so its chip is light grey too
+    let spans = label_chip_spans(&state, 0, "Alpha", false);
+    assert_eq!(spans[0].style.fg, Some(Color::Gray));
+    assert_eq!(spans[1].style.fg, Some(Color::DarkGray));
+}
+
+#[test]
+fn singleton_chips_are_uniformly_dark() {
+    use crate::ui::screens::main::label_chip_spans;
+    use ratatui::style::Color;
+
+    // A singleton's toggles are synchronized: no occurrence can
+    // diverge, so every chip is dark grey
+    let mut item = test_item("A", "Alpha");
+    item.labels.push("Beta".to_string());
+    item.singleton = true;
+    let state = test_state(vec![item]);
+    for current in ["Alpha", "Beta"] {
+        let spans = label_chip_spans(&state, 0, current, true);
+        assert!(
+            spans.iter().all(|s| s.style.fg == Some(Color::DarkGray)),
+            "a singleton's chips are uniformly dark under {current}"
+        );
+    }
 }

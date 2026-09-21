@@ -90,9 +90,9 @@ fn draw_item_dialog(
 ) {
     // Create a centered popup with dynamic size
     let popup_width = (size.width * 60 / 100).clamp(40, 60);
-    // Six field rows (Name, Category, Quantity, Mode, Rate, Buffer)
-    // plus borders and the hint area
-    let popup_height = 16;
+    // Seven field rows (Name, Labels, Singleton, Quantity, Mode,
+    // Rate, Buffer) plus borders and the hint area
+    let popup_height = 17;
 
     let popup_area = Rect {
         x: (size.width.saturating_sub(popup_width)) / 2,
@@ -143,56 +143,79 @@ fn draw_item_dialog(
     let name_para = Paragraph::new(vec![name_line]);
     f.render_widget(name_para, name_area);
 
-    // Draw category field: the selected category inline, with the
-    // membership marker when the dialog carries a membership set
-    // (edit dialog's Space multi-select). Left/Right cycle the
-    // selection; the value is always visible.
-    let category_area = Rect {
+    // Draw the labels field (spec 025): the multi-select's set, the
+    // highlighted picker entry with its membership marker, and the
+    // free-text input. Left/Right cycles the highlight; Space
+    // toggles membership; typed text joins on save.
+    let labels_area = Rect {
         x: content_area.x,
         y: content_area.y + 1,
         width: content_area.width,
         height: 1,
     };
-    let selected_category = if fields.category_index < fields.category_list.len() {
-        fields.category_list[fields.category_index].as_str()
+    let highlighted = if fields.label_index < fields.label_list.len() {
+        fields.label_list[fields.label_index].as_str()
     } else {
-        fields.category
+        ""
     };
-    let is_member = fields
-        .selected_categories
-        .as_ref()
-        .is_some_and(|set| set.iter().any(|c| c == selected_category));
-    let membership_marker = match fields.selected_categories.as_ref() {
-        Some(_) => {
-            if is_member {
-                "✓ "
+    let is_member = fields.selected_labels.iter().any(|l| l == highlighted);
+    let labels_line = Line::from(vec![
+        Span::raw("Labels: ").style(if fields.field == InputField::Labels {
+            field_style
+        } else {
+            normal_style
+        }),
+        Span::raw(if is_member { "✓ " } else { "○ " }).fg(if is_member {
+            Color::Green
+        } else {
+            Color::Red
+        }),
+        Span::raw(highlighted).style(if fields.field == InputField::Labels {
+            field_style
+        } else {
+            normal_style
+        }),
+        Span::raw(format!("  [{}]{}", fields.selected_labels.join(", "), {
+            if fields.label_input.is_empty() {
+                String::new()
             } else {
-                "○ "
+                format!(" +{}", fields.label_input)
             }
-        }
-        None => "",
-    };
-    let category_line = Line::from(vec![
-        Span::raw("Category: ").style(if fields.field == InputField::Category {
-            field_style
-        } else {
-            normal_style
-        }),
-        Span::raw(membership_marker).fg(if is_member { Color::Green } else { Color::Red }),
-        Span::raw(selected_category).style(if fields.field == InputField::Category {
-            field_style
-        } else {
-            normal_style
-        }),
-        Span::raw("  (←/→ change)").dim(),
+        }))
+        .dim(),
     ]);
-    let category_para = Paragraph::new(vec![category_line]);
-    f.render_widget(category_para, category_area);
+    let labels_para = Paragraph::new(vec![labels_line]);
+    f.render_widget(labels_para, labels_area);
+
+    // Draw the singleton field (spec 025, US5): Space toggles
+    let singleton_area = Rect {
+        x: content_area.x,
+        y: content_area.y + 2,
+        width: content_area.width,
+        height: 1,
+    };
+    let singleton_line = Line::from(vec![
+        Span::raw("Singleton: ").style(if fields.field == InputField::Singleton {
+            field_style
+        } else {
+            normal_style
+        }),
+        Span::raw(if fields.singleton { "yes" } else { "no" }).style(
+            if fields.field == InputField::Singleton {
+                field_style
+            } else {
+                normal_style
+            },
+        ),
+        Span::raw("  (Space toggles; syncs all labels)").dim(),
+    ]);
+    let singleton_para = Paragraph::new(vec![singleton_line]);
+    f.render_widget(singleton_para, singleton_area);
 
     // Draw quantity field
     let quantity_area = Rect {
         x: content_area.x,
-        y: content_area.y + 2,
+        y: content_area.y + 3,
         width: content_area.width,
         height: 1,
     };
@@ -211,7 +234,7 @@ fn draw_item_dialog(
     if let Some(auto) = fields.auto_quantity {
         let mode_area = Rect {
             x: content_area.x,
-            y: content_area.y + 3,
+            y: content_area.y + 4,
             width: content_area.width,
             height: 1,
         };
@@ -237,7 +260,7 @@ fn draw_item_dialog(
     // Draw rate field (spec 010): the item's per-day rate
     let rate_area = Rect {
         x: content_area.x,
-        y: content_area.y + 4,
+        y: content_area.y + 5,
         width: content_area.width,
         height: 1,
     };
@@ -256,7 +279,7 @@ fn draw_item_dialog(
     // Draw buffer field (spec 010): the kind and its value
     let buffer_area = Rect {
         x: content_area.x,
-        y: content_area.y + 5,
+        y: content_area.y + 6,
         width: content_area.width,
         height: 1,
     };
@@ -286,9 +309,9 @@ fn draw_item_dialog(
     // no binding is cut off mid-word
     let instructions_area = Rect {
         x: content_area.x,
-        y: content_area.y + 6,
+        y: content_area.y + 7,
         width: content_area.width,
-        height: content_area.height - 6,
+        height: content_area.height - 7,
     };
     let instructions = Paragraph::new(hint_rows(
         hint_entries(HintSurface::AddEditPopup),
@@ -466,8 +489,12 @@ fn draw_confirm_edit_popup(
         Line::from(""),
         Line::from(vec![Span::raw("Name: ").dim(), Span::raw(&pending.name)]),
         Line::from(vec![
-            Span::raw("Categories: ").dim(),
-            Span::raw(pending.categories.join(", ")),
+            Span::raw("Labels: ").dim(),
+            Span::raw(pending.labels.join(", ")),
+        ]),
+        Line::from(vec![
+            Span::raw("Singleton: ").dim(),
+            Span::raw(if pending.singleton { "yes" } else { "no" }),
         ]),
         Line::from(vec![
             Span::raw("Quantity: ").dim(),

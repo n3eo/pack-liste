@@ -4,20 +4,22 @@ use crate::ui::state::{InputField, InputMode, PendingEdit, QuantityBufferKind};
 use anyhow::Result;
 
 impl App {
-    /// Start adding a new item with the current category preselected.
+    /// Start adding a new item with the cursor's label preselected.
     pub(crate) fn start_adding_item(&mut self) {
-        let categories = self.get_all_categories();
-        let category_index = self
-            .current_category()
-            .and_then(|c| categories.iter().position(|k| k == &c))
+        let labels = self.all_labels();
+        let label_index = self
+            .current_label()
+            .and_then(|l| labels.iter().position(|k| k == &l))
             .unwrap_or(0);
         self.draw_state.input_mode = InputMode::AddingItem {
             field: InputField::Name,
             name: String::new(),
-            category: String::new(),
+            label_input: String::new(),
             quantity: String::new(),
-            category_list: categories,
-            category_index,
+            label_list: labels,
+            label_index,
+            selected_labels: vec![],
+            singleton: false,
             // New items start with the default modifiers (spec 010)
             // and the default mode: automatic (spec 021)
             rate: String::new(),
@@ -32,27 +34,36 @@ impl App {
         match self.draw_state.input_mode.clone() {
             InputMode::AddingItem {
                 name,
-                category,
+                label_input,
                 quantity,
-                category_index,
+                label_list,
+                label_index,
+                selected_labels,
+                singleton,
                 rate,
                 buffer_kind,
                 buffer_value,
                 auto_quantity,
                 ..
             } => {
-                // Get the selected category from the list
-                let categories = self.get_all_categories();
-                let selected_category = if category_index < categories.len() {
-                    categories[category_index].clone()
-                } else if !categories.is_empty() {
-                    categories[0].clone()
-                } else {
-                    category
-                };
+                // The labels: the multi-select's set, plus the free
+                // text when present; at least one required (FR-009)
+                let mut labels = selected_labels;
+                if !label_input.trim().is_empty() {
+                    let typed = label_input.trim().to_string();
+                    if !labels.contains(&typed) {
+                        labels.push(typed);
+                    }
+                }
+                if labels.is_empty()
+                    && let Some(highlighted) = label_list.get(label_index)
+                {
+                    labels.push(highlighted.clone());
+                }
                 self.save_new_item(
                     name,
-                    selected_category,
+                    labels,
+                    singleton,
                     quantity,
                     rate,
                     buffer_kind,
@@ -77,32 +88,37 @@ impl App {
             InputMode::EditingItem {
                 index,
                 name,
-                category,
+                label_input,
                 quantity,
                 rate,
                 buffer_kind,
                 buffer_value,
                 auto_quantity,
-                category_index,
-                selected_categories,
+                label_list,
+                label_index,
+                selected_labels,
+                singleton,
                 ..
             } => {
-                // The membership set from the dialog's multi-select; fall
-                // back to the single category when empty (never saved empty)
-                let categories = if !selected_categories.is_empty() {
-                    selected_categories
-                } else {
-                    let all = self.get_all_categories();
-                    if category_index < all.len() {
-                        vec![all[category_index].clone()]
-                    } else {
-                        vec![category]
+                // The labels: the multi-select's set, plus the free
+                // text when present; at least one required (FR-009)
+                let mut labels = selected_labels;
+                if !label_input.trim().is_empty() {
+                    let typed = label_input.trim().to_string();
+                    if !labels.contains(&typed) {
+                        labels.push(typed);
                     }
-                };
+                }
+                if labels.is_empty()
+                    && let Some(highlighted) = label_list.get(label_index)
+                {
+                    labels.push(highlighted.clone());
+                }
                 PendingEdit {
                     index,
                     name,
-                    categories,
+                    labels,
+                    singleton,
                     quantity,
                     auto_quantity,
                     rate,
@@ -126,7 +142,8 @@ impl App {
         self.save_edited_item(
             pending.index,
             pending.name,
-            pending.categories,
+            pending.labels,
+            pending.singleton,
             pending.quantity,
             pending.auto_quantity,
             pending.rate,
@@ -148,47 +165,67 @@ impl App {
     }
 
     /// Space in the add/edit dialog: toggle the quantity mode (Mode
-    /// field) or the membership of the highlighted category (Category
-    /// field).
+    /// field), the singleton flag (Singleton field), the buffer kind
+    /// (Buffer field), or the membership of the highlighted label
+    /// (Labels field).
     pub(crate) fn handle_dialog_space(&mut self) {
         match &mut self.draw_state.input_mode {
             InputMode::EditingItem {
                 field,
-                category_list,
-                category_index,
-                selected_categories,
+                label_list,
+                label_index,
+                selected_labels,
+                singleton,
                 buffer_kind,
                 ..
             } => match field {
                 InputField::Mode => self.draw_state.toggle_edit_mode(),
+                InputField::Singleton => *singleton = !*singleton,
                 InputField::Buffer => {
                     // Space cycles the buffer kind (spec 010); the value
                     // slot serves exactly one kind (FR-011)
                     *buffer_kind = buffer_kind.next();
                 }
-                InputField::Category => {
-                    if let Some(highlighted) = category_list.get(*category_index) {
+                InputField::Labels => {
+                    if let Some(highlighted) = label_list.get(*label_index) {
                         let highlighted = highlighted.clone();
-                        if let Some(pos) =
-                            selected_categories.iter().position(|c| c == &highlighted)
-                        {
+                        if let Some(pos) = selected_labels.iter().position(|l| l == &highlighted) {
                             // Keep at least one membership
-                            if selected_categories.len() > 1 {
-                                selected_categories.remove(pos);
+                            if selected_labels.len() > 1 {
+                                selected_labels.remove(pos);
                             }
                         } else {
-                            selected_categories.push(highlighted);
+                            selected_labels.push(highlighted);
                         }
                     }
                 }
                 _ => {}
             },
             InputMode::AddingItem {
-                field, buffer_kind, ..
+                field,
+                label_list,
+                label_index,
+                selected_labels,
+                singleton,
+                buffer_kind,
+                ..
             } => match field {
                 InputField::Mode => self.draw_state.toggle_edit_mode(),
+                InputField::Singleton => *singleton = !*singleton,
                 InputField::Buffer => {
                     *buffer_kind = buffer_kind.next();
+                }
+                InputField::Labels => {
+                    if let Some(highlighted) = label_list.get(*label_index) {
+                        let highlighted = highlighted.clone();
+                        if let Some(pos) = selected_labels.iter().position(|l| l == &highlighted) {
+                            if selected_labels.len() > 1 {
+                                selected_labels.remove(pos);
+                            }
+                        } else {
+                            selected_labels.push(highlighted);
+                        }
+                    }
                 }
                 _ => {}
             },
@@ -204,7 +241,7 @@ impl App {
             InputMode::AddingItem {
                 field,
                 name,
-                category,
+                label_input,
                 quantity,
                 rate,
                 buffer_value,
@@ -213,14 +250,15 @@ impl App {
             | InputMode::EditingItem {
                 field,
                 name,
-                category,
+                label_input,
                 quantity,
                 rate,
                 buffer_value,
                 ..
             } => match field {
                 InputField::Name => name.push(c),
-                InputField::Category => category.push(c),
+                InputField::Labels => label_input.push(c),
+                InputField::Singleton => {}
                 InputField::Quantity => quantity.push(c),
                 InputField::Rate => {
                     if c.is_ascii_digit() || c == '.' {
@@ -244,7 +282,7 @@ impl App {
             InputMode::AddingItem {
                 field,
                 name,
-                category,
+                label_input,
                 quantity,
                 rate,
                 buffer_value,
@@ -253,7 +291,7 @@ impl App {
             | InputMode::EditingItem {
                 field,
                 name,
-                category,
+                label_input,
                 quantity,
                 rate,
                 buffer_value,
@@ -262,9 +300,10 @@ impl App {
                 InputField::Name => {
                     name.pop();
                 }
-                InputField::Category => {
-                    category.pop();
+                InputField::Labels => {
+                    label_input.pop();
                 }
+                InputField::Singleton => {}
                 InputField::Quantity => {
                     quantity.pop();
                 }
@@ -284,10 +323,11 @@ impl App {
     pub(crate) fn start_editing_item(&mut self) {
         if let Some(item_index) = self.current_item_index() {
             let item = &self.draw_state.packing_list.items[item_index];
-            let categories = self.get_all_categories();
-            let category_index = categories
+            let labels = self.all_labels();
+            let label_index = item
+                .labels
                 .iter()
-                .position(|c| c == item.primary_category())
+                .find_map(|l| labels.iter().position(|k| k == l))
                 .unwrap_or(0);
 
             // The dialog's buffer state mirrors the item's buffer
@@ -303,15 +343,16 @@ impl App {
                 index: item_index,
                 field: InputField::Name,
                 name: item.name.clone(),
-                category: item.primary_category().to_string(),
+                label_input: String::new(),
                 quantity: item.quantity.to_string(),
                 rate: format!("{:.2}", item.rate),
                 buffer_kind,
                 buffer_value,
                 auto_quantity: item.auto_quantity,
-                category_list: categories,
-                category_index,
-                selected_categories: item.categories.clone(),
+                label_list: labels,
+                label_index,
+                selected_labels: item.labels.clone(),
+                singleton: item.singleton,
             };
         }
     }
@@ -322,7 +363,8 @@ impl App {
     pub(crate) fn save_new_item(
         &mut self,
         name: String,
-        category: String,
+        labels: Vec<String>,
+        singleton: bool,
         quantity: String,
         rate: String,
         buffer_kind: QuantityBufferKind,
@@ -331,7 +373,8 @@ impl App {
     ) {
         self.draw_state.add_item_from_dialog(
             name,
-            category,
+            labels,
+            singleton,
             quantity,
             auto_quantity,
             rate,
@@ -352,7 +395,8 @@ impl App {
         &mut self,
         index: usize,
         name: String,
-        categories: Vec<String>,
+        labels: Vec<String>,
+        singleton: bool,
         quantity: String,
         auto_quantity: bool,
         rate: String,
@@ -362,7 +406,8 @@ impl App {
         self.draw_state.apply_item_edit(
             index,
             name,
-            categories,
+            labels,
+            singleton,
             quantity,
             Some(auto_quantity),
             rate,

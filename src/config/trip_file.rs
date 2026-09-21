@@ -27,7 +27,13 @@ pub(crate) struct TripFile {
 /// and quantity. Strict per spec 013: every field required.
 pub(crate) struct TripItem {
     pub(crate) name: String,
-    pub(crate) category: String,
+    /// The item's labels at save time (spec 025): the snapshot of
+    /// the item's grouping.
+    pub(crate) labels: Vec<String>,
+    /// The singleton flag at save time (spec 025, US5); absent =
+    /// false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) singleton: bool,
     pub(crate) packed: bool,
     /// The item's quantity at save time (spec 012): the trip file is a
     /// complete snapshot.
@@ -75,34 +81,23 @@ impl TripFile {
     /// catalog are dropped; surviving items are matched to the catalog
     /// item's primary category. The packed state is preserved for items
     /// that still exist.
-    pub(crate) fn reconcile(&mut self, config_items: &[(String, Vec<String>)]) {
-        let find_config_categories = |name: &str, category: &str| -> Option<Vec<String>> {
-            // Prefer an exact match on both name and category, fall back
-            // to a name-only match
+    /// Reconcile the trip snapshot against the current config
+    /// (spec 025): match by name (case-insensitive), update the
+    /// labels and the singleton flag from the config item; packed
+    /// and quantity survive. Items with no config match drop.
+    pub(crate) fn reconcile(&mut self, config_items: &[(String, Vec<String>, bool)]) {
+        let find_config = |name: &str| -> Option<&(String, Vec<String>, bool)> {
             config_items
                 .iter()
-                .find(|(n, cs)| {
-                    n.eq_ignore_ascii_case(name)
-                        && cs.iter().any(|c| c.eq_ignore_ascii_case(category))
-                })
-                .or_else(|| {
-                    config_items
-                        .iter()
-                        .find(|(n, _)| n.eq_ignore_ascii_case(name))
-                })
-                .map(|(_, cs)| cs.clone())
+                .find(|(n, _, _)| n.eq_ignore_ascii_case(name))
         };
 
-        self.items
-            .retain(|item| find_config_categories(&item.name, &item.category).is_some());
+        self.items.retain(|item| find_config(&item.name).is_some());
 
         for item in &mut self.items {
-            if let Some(categories) = find_config_categories(&item.name, &item.category) {
-                // The trip file stores the primary category for display
-                item.category = categories
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| item.category.clone());
+            if let Some((_, labels, singleton)) = find_config(&item.name) {
+                item.labels = labels.clone();
+                item.singleton = *singleton;
             }
         }
     }

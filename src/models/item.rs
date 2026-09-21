@@ -16,13 +16,19 @@ pub(crate) enum QuantityBuffer {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-/// One packing-list item: its name, category memberships, quantity,
-/// and per-trip state (selected, packed, quantity mode).
+/// One packing-list item: its name, labels, quantity, and per-trip
+/// state (selected, packed, quantity mode). The labels are the item's
+/// only grouping data (spec 025): flat plain strings, no hierarchy.
 pub(crate) struct Item {
     pub(crate) name: String,
-    /// The categories this item belongs to; at least one. The first entry
-    /// is the primary category (used for display grouping in trip files).
-    pub(crate) categories: Vec<String>,
+    /// The labels this item carries; one or more, order preserved as
+    /// written. The item appears under every label it carries.
+    pub(crate) labels: Vec<String>,
+    /// When true, the item's selection and packed toggles are
+    /// synchronized across all its labels (spec 025, US5): one
+    /// selection state, one packed state. Meaningful only for
+    /// multi-label items; default false.
+    pub(crate) singleton: bool,
     pub(crate) quantity: u32,
     pub(crate) packed: bool,
     pub(crate) selected: bool,
@@ -38,12 +44,14 @@ pub(crate) struct Item {
 }
 
 impl Item {
-    /// Create an item: selected, unpacked, automatic quantity, with
-    /// the default modifiers (rate 1.0, no buffer).
-    pub(crate) fn new(name: String, categories: Vec<String>, quantity: u32) -> Self {
+    /// Create an item: selected, unpacked, automatic quantity, a
+    /// non-singleton, with the default modifiers (rate 1.0, no
+    /// buffer).
+    pub(crate) fn new(name: String, labels: Vec<String>, quantity: u32) -> Self {
         Self {
             name,
-            categories,
+            labels,
+            singleton: false,
             quantity,
             packed: false,
             selected: true,
@@ -53,26 +61,8 @@ impl Item {
         }
     }
 
-    /// The item's primary (first) category.
-    pub(crate) fn primary_category(&self) -> &str {
-        self.categories.first().map(String::as_str).unwrap_or("")
-    }
-
-    /// Whether the item belongs to the given category.
-    pub(crate) fn in_category(&self, category: &str) -> bool {
-        self.categories.iter().any(|c| c == category)
-    }
-}
-
-/// Split a category string into its two display layers (spec 024):
-/// the top layer (before the FIRST ": ") and the sub-category
-/// (everything after it, verbatim — it may itself contain ": ").
-/// A category without the separator has no sub-category: the whole
-/// string is the top layer. Pure — the input is never rewritten; the
-/// stored string remains the item's identity.
-pub(crate) fn category_layers(category: &str) -> (&str, Option<&str>) {
-    match category.split_once(": ") {
-        Some((top, sub)) => (top, Some(sub)),
-        None => (category, None),
+    /// Whether the item carries the given label.
+    pub(crate) fn has_label(&self, label: &str) -> bool {
+        self.labels.iter().any(|l| l == label)
     }
 }

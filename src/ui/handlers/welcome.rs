@@ -150,10 +150,10 @@ pub(crate) fn handle_main_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     use crossterm::event::KeyCode as K;
     use crossterm::event::KeyModifiers as M;
 
-    // Ctrl+Space toggles the category's selection (left panel)
+    // Ctrl+Space toggles the label's selection (left panel)
     if key.modifiers.contains(M::CONTROL) && key.code == K::Char(' ') {
         if app.draw_state.focus_side == FocusSide::Left {
-            app.toggle_category_selection();
+            app.toggle_label_selection();
         }
         return Ok(false);
     }
@@ -198,7 +198,7 @@ pub(crate) fn handle_main_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         K::Char('c') | K::Char('C') => {
             if app.draw_state.focus_side == FocusSide::Left {
-                app.toggle_category_collapse();
+                app.toggle_label_collapse();
             }
         }
         K::Char('a') | K::Char('A') => {
@@ -277,7 +277,7 @@ pub(crate) fn handle_dialog_input(app: &mut App, key: KeyEvent) -> Result<bool> 
                     // (spec 020, US3): the category cycles the
                     // selection; the quantity steps ±1
                     let direction = if key.code == K::Right { 1 } else { -1 };
-                    app.draw_state.cycle_category_selection(direction);
+                    app.draw_state.cycle_label_highlight(direction);
                     app.draw_state.step_dialog_quantity(direction);
                 }
                 K::Char(' ') => {

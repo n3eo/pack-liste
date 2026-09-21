@@ -14,7 +14,6 @@ use crate::models::weekdays::Weekdays;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AppConfig {
-    pub(crate) categories: Vec<String>,
     pub(crate) items: Vec<SavedItem>,
     pub(crate) weekdays: u32,
     pub(crate) travel_style: String,
@@ -27,16 +26,22 @@ pub(crate) struct AppConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-/// One item as persisted in the config file: name, category
-/// memberships, the quantity mode (fixed items keep their value),
-/// and the per-item modifiers (spec 010). Strict per spec 013:
-/// `categories` is required; `quantity` is optional-in-format
-/// (automatic items legitimately omit it); unknown fields reject.
+/// One item as persisted in the config file: name, labels (spec 025),
+/// the singleton flag, the quantity mode (fixed items keep their
+/// value), and the per-item modifiers (spec 010). Strict per spec
+/// 013: `labels` is required and non-empty; `singleton` is optional
+/// (absent = false); `quantity` is optional-in-format (automatic
+/// items legitimately omit it); unknown fields reject.
 pub(crate) struct SavedItem {
     pub(crate) name: String,
-    /// The item's categories; at least one. A legacy single `category:`
-    /// string is lifted into a one-element list on load.
-    pub(crate) categories: Vec<String>,
+    /// The item's labels; one or more plain strings (spec 025) —
+    /// the item's only grouping data, no hierarchy, no separator.
+    pub(crate) labels: Vec<String>,
+    /// The singleton flag (spec 025, US5): the item's toggles are
+    /// synchronized across all its labels. Optional in format;
+    /// absent = false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) singleton: bool,
     /// Only present for fixed-quantity items (auto_quantity: false);
     /// auto items are recalculated on every load
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -88,14 +93,25 @@ pub(crate) fn load_config(config_file: &PathBuf) -> Result<(PackingList, TripPar
     // Create packing list from config
     let mut packing_list = PackingList::new();
 
+    // The dedup (spec 025, US2/FR-005): entries with the same name
+    // and the same labels are one item — the first occurrence wins;
+    // later exact matches drop. Same name with different labels are
+    // distinct items.
+    let mut seen: std::collections::BTreeSet<(String, Vec<String>)> =
+        std::collections::BTreeSet::new();
     for saved_item in config.items {
+        let key = (saved_item.name.clone(), saved_item.labels.clone());
+        if !seen.insert(key) {
+            continue;
+        }
         let auto = saved_item.auto_quantity;
         let fixed_quantity = if auto {
             1
         } else {
             saved_item.quantity.unwrap_or(1)
         };
-        let mut item = Item::new(saved_item.name, saved_item.categories, fixed_quantity);
+        let mut item = Item::new(saved_item.name, saved_item.labels, fixed_quantity);
+        item.singleton = saved_item.singleton;
         item.auto_quantity = auto;
         // Per-item modifiers (spec 010): absent fields load as the
         // defaults (rate 1.0, no buffer) — pre-feature files unchanged
@@ -145,10 +161,10 @@ pub(crate) fn create_default_config(config_file: &PathBuf) -> Result<(PackingLis
         ("Sunglasses", "Accessories", 1),
     ];
 
-    for (name, category, quantity) in default_items {
+    for (name, label, quantity) in default_items {
         packing_list.add_item(Item::new(
             name.to_string(),
-            vec![category.to_string()],
+            vec![label.to_string()],
             quantity,
         ));
     }
@@ -164,15 +180,6 @@ pub(crate) fn create_default_config(config_file: &PathBuf) -> Result<(PackingLis
 
     // Save config
     let config = AppConfig {
-        categories: vec![
-            "Clothing".to_string(),
-            "Toiletries".to_string(),
-            "Documents".to_string(),
-            "Electronics".to_string(),
-            "Footwear".to_string(),
-            "Accessories".to_string(),
-            "Miscellaneous".to_string(),
-        ],
         items: packing_list
             .items
             .iter()
@@ -180,7 +187,8 @@ pub(crate) fn create_default_config(config_file: &PathBuf) -> Result<(PackingLis
                 let auto = item.auto_quantity;
                 SavedItem {
                     name: item.name.clone(),
-                    categories: item.categories.clone(),
+                    labels: item.labels.clone(),
+                    singleton: item.singleton,
                     quantity: if auto { None } else { Some(item.quantity) },
                     auto_quantity: auto,
                     rate: None,

@@ -5,7 +5,7 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use crate::models::item::{Item, category_layers};
+use crate::models::item::Item;
 use crate::ui::hints::{
     HintSurface, collapsed_hint_line, hint_entries, hint_rows, hint_rows_fit_budget,
 };
@@ -235,54 +235,26 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
             height: 1,
         };
         match row {
-            PanelRow::Group(group) => {
-                // The top-layer header (spec 024): the group's collapse
-                // symbol and name, unindented
-                let is_collapsed = state.collapsed_groups.contains(group);
-                let group_symbol = if is_collapsed { "▶ " } else { "▼ " };
-                let group_line = Line::from(vec![
-                    Span::raw(group_symbol).fg(Color::Yellow),
+            PanelRow::Label(label) => {
+                // The flat label header (spec 025): the collapse
+                // symbol and name
+                let is_collapsed = state.collapsed_labels.contains(label);
+                let label_symbol = if is_collapsed { "▶ " } else { "▼ " };
+                let label_line = Line::from(vec![
+                    Span::raw(label_symbol).fg(Color::Yellow),
                     Span::raw(truncate_row_text(
-                        group,
-                        group_symbol,
+                        label,
+                        label_symbol,
                         "",
                         list_area.width as usize,
                     ))
                     .bold()
                     .fg(Color::Cyan),
                 ]);
-                let group_para =
-                    Paragraph::new(vec![group_line]).block(Block::default().borders(Borders::NONE));
-                f.render_widget(group_para, row_area);
-                // Highlight the group header the cursor is on
-                if current_row == Some(*row_pos) {
-                    let highlight = Block::default().style(Style::new().bg(Color::DarkGray));
-                    f.render_widget(highlight, row_area);
-                }
-            }
-            PanelRow::Category(category) => {
-                // The sub-category header (spec 024): the part after
-                // the first ": ", indented under its group; the payload
-                // stays the full category string (the identity)
-                let (_, sub) = category_layers(category);
-                let is_collapsed = state.collapsed_categories.contains(category);
-                let category_symbol = if is_collapsed { "▶ " } else { "▼ " };
-                let category_line = Line::from(vec![
-                    Span::raw("  ").fg(Color::Yellow),
-                    Span::raw(category_symbol).fg(Color::Yellow),
-                    Span::raw(truncate_row_text(
-                        sub.unwrap_or(category),
-                        &format!("  {category_symbol}"),
-                        "",
-                        list_area.width as usize,
-                    ))
-                    .bold()
-                    .fg(Color::Cyan),
-                ]);
-                let category_para = Paragraph::new(vec![category_line])
-                    .block(Block::default().borders(Borders::NONE));
-                f.render_widget(category_para, row_area);
-                // Highlight the category header the cursor is on
+                let label_para =
+                    Paragraph::new(vec![label_line]).block(Block::default().borders(Borders::NONE));
+                f.render_widget(label_para, row_area);
+                // Highlight the label header the cursor is on
                 if current_row == Some(*row_pos) {
                     let highlight = Block::default().style(Style::new().bg(Color::DarkGray));
                     f.render_widget(highlight, row_area);
@@ -298,12 +270,34 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
                     Style::new()
                 };
 
-                let selection_symbol = if item.selected { "✓" } else { "○" };
+                // The occurrence's effective selection under the
+                // current label (spec 025, FR-012): the override if
+                // present, else the item's own state
+                let current_label = rows
+                    .get(*row_pos)
+                    .and_then(|_| {
+                        rows[..*row_pos].iter().rev().find_map(|r| match r {
+                            PanelRow::Label(l) => Some(l.clone()),
+                            _ => None,
+                        })
+                    })
+                    .unwrap_or_default();
+                let occurrence_selected = state.effective_selected(*item_index, &current_label);
+                let selection_symbol = if occurrence_selected { "✓" } else { "○" };
 
                 let quantity_suffix = format!(" x{}", item.quantity);
-                let item_line = Line::from(vec![
+                // The chips render between the name and the quantity
+                // (SC-009): their width joins the truncation budget so
+                // the quantity never leaves the row
+                let chips =
+                    label_chip_spans(state, *item_index, &current_label, occurrence_selected);
+                let chips_width: usize = chips.iter().map(|s| s.content.chars().count()).sum();
+                // The budget: everything after the name — the chips
+                // plus " x<quantity>"
+                let suffix_budget = " ".repeat(chips_width + quantity_suffix.chars().count());
+                let mut spans = vec![
                     Span::raw("  "),
-                    Span::raw(selection_symbol).fg(if item.selected {
+                    Span::raw(selection_symbol).fg(if occurrence_selected {
                         Color::Green
                     } else {
                         Color::Red
@@ -312,13 +306,15 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
                     Span::raw(truncate_row_text(
                         &item.name,
                         "  ✓ ",
-                        &quantity_suffix,
+                        &suffix_budget,
                         list_area.width as usize,
                     ))
                     .style(item_style),
-                    Span::raw(" x"),
-                    Span::raw(item.quantity.to_string()).bold(),
-                ]);
+                ];
+                spans.extend(chips);
+                spans.push(Span::raw(" x"));
+                spans.push(Span::raw(item.quantity.to_string()).bold());
+                let item_line = Line::from(spans);
 
                 let item_para =
                     Paragraph::new(vec![item_line]).block(Block::default().borders(Borders::NONE));
@@ -349,6 +345,46 @@ fn draw_all_items_panel(f: &mut ratatui::prelude::Frame, area: Rect, state: &mut
         ]);
         f.render_widget(Paragraph::new(line), status_area);
     }
+}
+
+/// The label chips for an item row (spec 025, US5): one span per
+/// label, ` [Label]` — dark grey when the occurrence's effective
+/// state matches the item's own on both dimensions (selection and
+/// packed), light grey when either differs (only possible for a
+/// non-singleton with an override). A singleton's overrides are
+/// always clear, so its chips are uniformly dark.
+pub(crate) fn label_chip_spans(
+    state: &AppDrawState,
+    item_index: usize,
+    current_label: &str,
+    item_state: bool,
+) -> Vec<Span<'static>> {
+    let item = &state.packing_list.items[item_index];
+    item.labels
+        .iter()
+        .map(|label| {
+            // The occurrence's effective states: the row's displayed
+            // state under the current label, the override (or the
+            // item's own state) under the others
+            let (occurrence_selected, occurrence_packed) = if label == current_label {
+                (item_state, item.packed)
+            } else {
+                (
+                    state.effective_selected(item_index, label),
+                    state.effective_packed(item_index, label),
+                )
+            };
+            // Dark when the occurrence matches the item's own state
+            // on both dimensions
+            let matches = occurrence_selected == item.selected && occurrence_packed == item.packed;
+            let color = if matches {
+                Color::DarkGray
+            } else {
+                Color::Gray
+            };
+            Span::raw(format!(" [{label}]")).fg(color)
+        })
+        .collect()
 }
 
 // Whether every item of a category is packed; an empty category counts
@@ -478,22 +514,18 @@ fn draw_selected_items_panel(
         };
 
         match row {
-            PanelRow::Group(group) => {
-                // The top-layer header (spec 024): the packing
-                // indicator computed over every selected item under
-                // the group (any category whose top layer matches)
+            PanelRow::Label(label) => {
+                // The flat label header (spec 025): the packing
+                // indicator computed over every selected item's
+                // occurrence under this label (the effective packed
+                // state, spec 025 FR-012)
                 let packed_states: Vec<bool> = state
                     .packing_list
                     .items
                     .iter()
-                    .filter(|item| {
-                        item.selected
-                            && item
-                                .categories
-                                .iter()
-                                .any(|c| category_layers(c).0 == group)
-                    })
-                    .map(|item| item.packed)
+                    .enumerate()
+                    .filter(|(_, item)| item.selected && item.has_label(label))
+                    .map(|(idx, _)| state.effective_packed(idx, label))
                     .collect();
                 let all_packed = category_all_packed(&packed_states);
                 let (marker, marker_color) = if all_packed {
@@ -501,11 +533,11 @@ fn draw_selected_items_panel(
                 } else {
                     ("○ ", Color::Red)
                 };
-                let group_line = Line::from(vec![
+                let label_line = Line::from(vec![
                     Span::raw(marker).fg(marker_color),
                     Span::raw("▼ "),
                     Span::raw(truncate_row_text(
-                        group,
+                        label,
                         &format!("{marker}▼ "),
                         "",
                         list_area.width as usize,
@@ -513,49 +545,10 @@ fn draw_selected_items_panel(
                     .bold()
                     .fg(Color::Cyan),
                 ]);
-                let group_para =
-                    Paragraph::new(vec![group_line]).block(Block::default().borders(Borders::NONE));
-                f.render_widget(group_para, row_area);
-                // Highlight the group header the cursor is on
-                if cursor_drawn_row == Some(*row_pos) {
-                    let highlight = Block::default().style(Style::new().bg(Color::DarkGray));
-                    f.render_widget(highlight, row_area);
-                }
-            }
-            PanelRow::Category(category) => {
-                // Packing indicator on the compiled list's category header:
-                // all-packed (✓ green) vs. partially packed (○ red)
-                let packed_states: Vec<bool> = state
-                    .packing_list
-                    .items
-                    .iter()
-                    .filter(|item| item.selected && item.in_category(category))
-                    .map(|item| item.packed)
-                    .collect();
-                let all_packed = category_all_packed(&packed_states);
-                let (marker, marker_color) = if all_packed {
-                    ("✓ ", Color::Green)
-                } else {
-                    ("○ ", Color::Red)
-                };
-
-                let category_line = Line::from(vec![
-                    Span::raw(marker).fg(marker_color),
-                    Span::raw("  ▼ "),
-                    Span::raw(truncate_row_text(
-                        category_layers(category).1.unwrap_or(category),
-                        &format!("{marker}  ▼ "),
-                        "",
-                        list_area.width as usize,
-                    ))
-                    .bold()
-                    .fg(Color::Cyan),
-                ]);
-
-                let category_para = Paragraph::new(vec![category_line])
-                    .block(Block::default().borders(Borders::NONE));
-                f.render_widget(category_para, row_area);
-                // Highlight the sub-category header the cursor is on
+                let label_para =
+                    Paragraph::new(vec![label_line]).block(Block::default().borders(Borders::NONE));
+                f.render_widget(label_para, row_area);
+                // Highlight the label header the cursor is on
                 if cursor_drawn_row == Some(*row_pos) {
                     let highlight = Block::default().style(Style::new().bg(Color::DarkGray));
                     f.render_widget(highlight, row_area);
@@ -571,12 +564,33 @@ fn draw_selected_items_panel(
                     Style::new()
                 };
 
-                let item_symbol = if item.packed { "✓ " } else { "○ " };
+                // The occurrence's effective packed state under the
+                // current label (spec 025, FR-012): the override if
+                // present, else the item's own state
+                let current_label = drawn_rows
+                    .get(*row_pos)
+                    .and_then(|_| {
+                        drawn_rows[..*row_pos].iter().rev().find_map(|r| match r {
+                            PanelRow::Label(l) => Some(l.clone()),
+                            _ => None,
+                        })
+                    })
+                    .unwrap_or_default();
+                let occurrence_packed = state.effective_packed(*item_index, &current_label);
+                let item_symbol = if occurrence_packed { "✓ " } else { "○ " };
 
                 let quantity_suffix = format!(" x{}", item.quantity);
-                let item_line = Line::from(vec![
+                // The chips render between the name and the quantity
+                // (SC-009): their width joins the truncation budget so
+                // the quantity never leaves the row
+                let chips = label_chip_spans(state, *item_index, &current_label, item.selected);
+                let chips_width: usize = chips.iter().map(|s| s.content.chars().count()).sum();
+                // The budget: everything after the name — the chips
+                // plus " x<quantity>"
+                let suffix_budget = " ".repeat(chips_width + quantity_suffix.chars().count());
+                let mut spans = vec![
                     Span::raw("  "),
-                    Span::raw(item_symbol).fg(if item.packed {
+                    Span::raw(item_symbol).fg(if occurrence_packed {
                         Color::Green
                     } else {
                         Color::Red
@@ -585,13 +599,15 @@ fn draw_selected_items_panel(
                     Span::raw(truncate_row_text(
                         &item.name,
                         "  ✓ ",
-                        &quantity_suffix,
+                        &suffix_budget,
                         list_area.width as usize,
                     ))
                     .style(item_style),
-                    Span::raw(" x"),
-                    Span::raw(item.quantity.to_string()).bold(),
-                ]);
+                ];
+                spans.extend(chips);
+                spans.push(Span::raw(" x"));
+                spans.push(Span::raw(item.quantity.to_string()).bold());
+                let item_line = Line::from(spans);
 
                 let item_para =
                     Paragraph::new(vec![item_line]).block(Block::default().borders(Borders::NONE));

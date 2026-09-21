@@ -1,886 +1,1102 @@
-categories:
-- 'Ausland: Ausland'
-- 'Ausland: Handgepäck'
-- 'Ausland: Karten'
-- 'Dokumente_Karte: Dokumente/Karten'
-- 'Dokumente_Karte: Unterhaltung'
-- 'Ferienwohnung: Sonstiges'
-- 'Ferienwohnung: Verpflegung'
-- 'Geschäftsreise: Dokumente'
-- 'Geschäftsreise: Klamotten'
-- 'Geschäftsreise: Technik'
-- 'Kulturbeutel: Kulturbeutel'
-- 'Kulturbeutel: Reiseapotheke'
-- 'Kulturbeutel: Reiseapotheke (Groß)'
-- 'Reiseart: Auto'
-- 'Reiseart: Bahn'
-- 'Reiseart: Flugzeug'
-- 'Reiseart: Hütte'
-- 'Städtereisen: Jacken'
-- 'Städtereisen: Klamotten'
-- 'Städtereisen: Schuhe'
-- 'Städtereisen: Sonstiges'
-- 'Technik: Audio'
-- 'Technik: Handy'
-- 'Technik: IPad'
-- 'Technik: Laptop'
-- 'Unternehmungen: Auto'
-- 'Unternehmungen: Fahrrad'
-- 'Unternehmungen: Gym'
-- 'Unternehmungen: Schwimmen'
-- 'Unternehmungen: Ski fahren'
-- 'Unternehmungen: Sonstiges'
-- 'Unternehmungen: Sport'
-- 'Unternehmungen: Strand'
-- 'Unternehmungen: Wandern'
-- 'Unternehmungen: Winter'
 items:
 - name: wasserfeste
-  categories:
-  - 'Städtereisen: Schuhe'
+  labels:
+  - Städtereisen
+  - Schuhe
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: bequeme
-  categories:
-  - 'Städtereisen: Schuhe'
+  labels:
+  - Städtereisen
+  - Schuhe
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: elegante
-  categories:
-  - 'Städtereisen: Schuhe'
+  labels:
+  - Städtereisen
+  - Schuhe
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: FlipFlop
-  categories:
-  - 'Städtereisen: Schuhe'
+  labels:
+  - Städtereisen
+  - Schuhe
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Hausschuhe
-  categories:
-  - 'Reiseart: Hütte'
+  labels:
+  - Reiseart
+  - Hütte
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Unterhosen
-  categories:
-  - 'Städtereisen: Klamotten'
+  labels:
+  - Städtereisen
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: Socken
-  categories:
-  - 'Städtereisen: Klamotten'
+  labels:
+  - Städtereisen
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: T-Shirt
-  categories:
-  - 'Ausland: Handgepäck'
+  labels:
+  - Ausland
+  - Handgepäck
+  singleton: true
   auto_quantity: true
 - name: kurze Hose
-  categories:
-  - 'Städtereisen: Klamotten'
+  labels:
+  - Städtereisen
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: lange Hose
-  categories:
-  - 'Städtereisen: Klamotten'
+  labels:
+  - Städtereisen
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: lange Jogginghose
-  categories:
-  - 'Städtereisen: Klamotten'
+  labels:
+  - Städtereisen
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: kurze Jogginghose
-  categories:
-  - 'Städtereisen: Klamotten'
+  labels:
+  - Städtereisen
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: Schlaf T-Shirt
-  categories:
-  - 'Städtereisen: Klamotten'
+  labels:
+  - Städtereisen
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: Schlaf Hose
-  categories:
-  - 'Städtereisen: Klamotten'
+  labels:
+  - Städtereisen
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: Pulli/Sweatjacke
-  categories:
-  - 'Städtereisen: Klamotten'
+  labels:
+  - Städtereisen
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: Dünner Pulli/Langärmliges T-Shirt
-  categories:
-  - 'Städtereisen: Klamotten'
+  labels:
+  - Städtereisen
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: Gürtel
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Halstuch
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Wanderhose 2 in 1
-  categories:
-  - 'Städtereisen: Klamotten'
+  labels:
+  - Städtereisen
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: Hemd
-  categories:
-  - 'Geschäftsreise: Klamotten'
+  labels:
+  - Geschäftsreise
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: regendichte Jacke
-  categories:
-  - 'Städtereisen: Jacken'
+  labels:
+  - Städtereisen
+  - Jacken
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Softshell
-  categories:
-  - 'Städtereisen: Jacken'
+  labels:
+  - Städtereisen
+  - Jacken
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Winterjacke
-  categories:
-  - 'Städtereisen: Jacken'
+  labels:
+  - Städtereisen
+  - Jacken
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Sommerjacke
-  categories:
-  - 'Städtereisen: Jacken'
+  labels:
+  - Städtereisen
+  - Jacken
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Ärmellose Softshell
-  categories:
-  - 'Unternehmungen: Fahrrad'
+  labels:
+  - Unternehmungen
+  - Fahrrad
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Kopfhörer
-  categories:
-  - 'Technik: Handy'
+  labels:
+  - Technik
+  - Handy
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Handy-Ladekabel
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Kissen
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Ohropax
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Reiseapotheke
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Reisedesinfekt
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: (Notiz-)Block/Papier
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Stift(e)
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Bargeld (€)
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Messer
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Kaffee-Becher
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Rucksack
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Flasche
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Handtuch groß
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Handtuch klein
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Plastiktüte
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Regenschirm
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: kleine Taschenlampe
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Vesper
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Taschentücher
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Stadtführer/Karte
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Masken (+Medi aus M)
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Turnbeutel/Kleiner Rucksack
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Hut/Kappe
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Sonnencreme
-  categories:
-  - 'Unternehmungen: Strand'
+  labels:
+  - Unternehmungen
+  - Strand
+  singleton: true
   auto_quantity: true
 - name: Wiederverwendbares Besteck
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Powerbank
-  categories:
-  - 'Technik: Laptop'
+  labels:
+  - Technik
+  - Laptop
+  singleton: true
   auto_quantity: true
 - name: Knie Bandage
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Brille
-  categories:
-  - 'Unternehmungen: Auto'
+  labels:
+  - Unternehmungen
+  - Auto
+  singleton: true
   auto_quantity: true
 - name: Studentenfutter
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Büroklammer
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Kaugummi
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Fächer
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Bauchtasche
-  categories:
-  - 'Städtereisen: Sonstiges'
+  labels:
+  - Städtereisen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Gewürze
-  categories:
-  - 'Ferienwohnung: Verpflegung'
+  labels:
+  - Ferienwohnung
+  - Verpflegung
+  singleton: true
   auto_quantity: true
 - name: Essig & Öl
-  categories:
-  - 'Ferienwohnung: Verpflegung'
+  labels:
+  - Ferienwohnung
+  - Verpflegung
+  singleton: true
   auto_quantity: true
 - name: (Boden-)Decke
-  categories:
-  - 'Ferienwohnung: Sonstiges'
+  labels:
+  - Ferienwohnung
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Zahnbürste
-  categories:
-  - 'Ausland: Handgepäck'
+  labels:
+  - Ausland
+  - Handgepäck
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Zahnpasta
-  categories:
-  - 'Ausland: Handgepäck'
+  labels:
+  - Ausland
+  - Handgepäck
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Rasierer nass
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Rasierer trocken
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Deo
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Deo (sprühen)
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Haarwachs/-gel
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Rasierschaum
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Handseife
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Bartgel
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Mückenspray
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Duschgel/Shampoo
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Handcreme
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Pinzette
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Schere
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Wattestäbchen
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Kondome
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Badelatschen
-  categories:
-  - 'Kulturbeutel: Kulturbeutel'
+  labels:
+  - Kulturbeutel
+  singleton: true
   auto_quantity: true
 - name: Pflaster
-  categories:
-  - 'Kulturbeutel: Reiseapotheke'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke
+  singleton: true
   auto_quantity: true
 - name: Iberogast
-  categories:
-  - 'Kulturbeutel: Reiseapotheke'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke
+  singleton: true
   auto_quantity: true
 - name: Schmerztabletten
-  categories:
-  - 'Kulturbeutel: Reiseapotheke'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke
+  singleton: true
   auto_quantity: true
 - name: Rei in der Tube
-  categories:
-  - 'Kulturbeutel: Reiseapotheke'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke
+  singleton: true
   auto_quantity: true
 - name: Bepanthen
-  categories:
-  - 'Kulturbeutel: Reiseapotheke'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke
+  singleton: true
   auto_quantity: true
 - name: Reiseapotheke (Klein)
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Bonbons
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Augentropfen
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
-  auto_quantity: true
-- name: Handcreme
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Durchfallmittel
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Vitamine
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Fieberthermometer
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Fenistil
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Heizer
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Hustentabletten
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Antibakterielle Creme
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Verbandsmaterial
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Wunddestinfektionsmittel
-  categories:
-  - 'Kulturbeutel: Reiseapotheke (Groß)'
+  labels:
+  - Kulturbeutel
+  - Reiseapotheke (Groß)
+  singleton: true
   auto_quantity: true
 - name: Badehose
-  categories:
-  - 'Unternehmungen: Schwimmen'
+  labels:
+  - Unternehmungen
+  - Schwimmen
+  singleton: true
   auto_quantity: true
 - name: (Strand-)Handtuch
-  categories:
-  - 'Unternehmungen: Strand'
+  labels:
+  - Unternehmungen
+  - Strand
+  singleton: true
   auto_quantity: true
 - name: Sonnenbrille
-  categories:
-  - 'Unternehmungen: Strand'
-  auto_quantity: true
-- name: Sonnencreme
-  categories:
-  - 'Unternehmungen: Strand'
+  labels:
+  - Unternehmungen
+  - Strand
+  singleton: true
   auto_quantity: true
 - name: Apré-Milch
-  categories:
-  - 'Unternehmungen: Strand'
+  labels:
+  - Unternehmungen
+  - Strand
+  singleton: true
   auto_quantity: true
 - name: Wickelfisch
-  categories:
-  - 'Unternehmungen: Strand'
+  labels:
+  - Unternehmungen
+  - Strand
+  singleton: true
   auto_quantity: true
 - name: Schloss, Schlüssel
-  categories:
-  - 'Unternehmungen: Fahrrad'
+  labels:
+  - Unternehmungen
+  - Fahrrad
+  singleton: true
   auto_quantity: true
 - name: Licht vorne
-  categories:
-  - 'Unternehmungen: Fahrrad'
+  labels:
+  - Unternehmungen
+  - Fahrrad
+  singleton: true
   auto_quantity: true
 - name: Licht hinten
-  categories:
-  - 'Unternehmungen: Fahrrad'
+  labels:
+  - Unternehmungen
+  - Fahrrad
+  singleton: true
   auto_quantity: true
 - name: Tacho
-  categories:
-  - 'Unternehmungen: Fahrrad'
+  labels:
+  - Unternehmungen
+  - Fahrrad
+  singleton: true
   auto_quantity: true
 - name: Helm
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Handschuhe
-  categories:
-  - 'Unternehmungen: Winter'
+  labels:
+  - Unternehmungen
+  - Winter
+  singleton: true
   auto_quantity: true
 - name: Werkzeug
-  categories:
-  - 'Unternehmungen: Fahrrad'
+  labels:
+  - Unternehmungen
+  - Fahrrad
+  singleton: true
   auto_quantity: true
 - name: Pumpe
-  categories:
-  - 'Unternehmungen: Fahrrad'
+  labels:
+  - Unternehmungen
+  - Fahrrad
+  singleton: true
   auto_quantity: true
 - name: Erste Hilfe Kit
-  categories:
-  - 'Unternehmungen: Fahrrad'
-  auto_quantity: true
-- name: Ärmellose Softshell
-  categories:
-  - 'Unternehmungen: Fahrrad'
+  labels:
+  - Unternehmungen
+  - Fahrrad
+  singleton: true
   auto_quantity: true
 - name: Tischtennisschläger
-  categories:
-  - 'Unternehmungen: Sport'
+  labels:
+  - Unternehmungen
+  - Sport
+  singleton: true
   auto_quantity: true
 - name: Ball
-  categories:
-  - 'Unternehmungen: Sport'
+  labels:
+  - Unternehmungen
+  - Sport
+  singleton: true
   auto_quantity: true
 - name: Bücher
-  categories:
-  - 'Dokumente_Karte: Unterhaltung'
+  labels:
+  - Dokumente_Karte
+  - Unterhaltung
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Ebook Reader
-  categories:
-  - 'Unternehmungen: Sonstiges'
+  labels:
+  - Unternehmungen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Spielkarten
-  categories:
-  - 'Unternehmungen: Sonstiges'
-  auto_quantity: true
-- name: Brille
-  categories:
-  - 'Unternehmungen: Auto'
+  labels:
+  - Unternehmungen
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Ersatzschlüssel
-  categories:
-  - 'Reiseart: Auto'
+  labels:
+  - Reiseart
+  - Auto
+  singleton: true
   auto_quantity: true
 - name: Wanderschuhe
-  categories:
-  - 'Unternehmungen: Wandern'
+  labels:
+  - Unternehmungen
+  - Wandern
+  singleton: true
   auto_quantity: true
 - name: Trinkflasche
-  categories:
-  - 'Unternehmungen: Wandern'
+  labels:
+  - Unternehmungen
+  - Wandern
+  singleton: true
   auto_quantity: true
 - name: Lange/dicke socken
-  categories:
-  - 'Unternehmungen: Wandern'
+  labels:
+  - Unternehmungen
+  - Wandern
+  singleton: true
   auto_quantity: true
 - name: Wanderhose
-  categories:
-  - 'Unternehmungen: Wandern'
+  labels:
+  - Unternehmungen
+  - Wandern
+  singleton: true
   auto_quantity: true
 - name: Wanderrucksack
-  categories:
-  - 'Unternehmungen: Wandern'
-  auto_quantity: true
-- name: Helm
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Wandern
+  singleton: true
   auto_quantity: true
 - name: Ski hose
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Ski Jacke
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Ski brille
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Lange unterhosen
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Hohe Schuhe
-  categories:
-  - 'Unternehmungen: Ski fahren'
-  auto_quantity: true
-- name: Handschuhe
-  categories:
-  - 'Unternehmungen: Winter'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Stumhaube
-  categories:
-  - 'Unternehmungen: Ski fahren'
-  auto_quantity: true
-- name: Halstuch
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: UV lippen stift + gescht creme
-  categories:
-  - 'Unternehmungen: Ski fahren'
-  auto_quantity: true
-- name: Gürtel
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Ski Socken
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Kleine Flasche
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Ski Schuhe
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Ski
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Ski Stöcke
-  categories:
-  - 'Unternehmungen: Ski fahren'
+  labels:
+  - Unternehmungen
+  - Ski fahren
+  singleton: true
   auto_quantity: true
 - name: Handtuch
-  categories:
-  - 'Unternehmungen: Gym'
+  labels:
+  - Unternehmungen
+  - Gym
+  singleton: true
   auto_quantity: true
 - name: Schwimmbrille
-  categories:
-  - 'Unternehmungen: Schwimmen'
-  auto_quantity: true
-- name: Badehose
-  categories:
-  - 'Unternehmungen: Schwimmen'
+  labels:
+  - Unternehmungen
+  - Schwimmen
+  singleton: true
   auto_quantity: true
 - name: Mütze
-  categories:
-  - 'Unternehmungen: Winter'
-  auto_quantity: true
-- name: Handschuhe
-  categories:
-  - 'Unternehmungen: Winter'
+  labels:
+  - Unternehmungen
+  - Winter
+  singleton: true
   auto_quantity: true
 - name: Lange Unterhosen
-  categories:
-  - 'Unternehmungen: Winter'
-  auto_quantity: true
-- name: Handtuch
-  categories:
-  - 'Unternehmungen: Gym'
+  labels:
+  - Unternehmungen
+  - Winter
+  singleton: true
   auto_quantity: true
 - name: Sporthose
-  categories:
-  - 'Unternehmungen: Gym'
+  labels:
+  - Unternehmungen
+  - Gym
+  singleton: true
   auto_quantity: true
 - name: Sportschuhe
-  categories:
-  - 'Unternehmungen: Gym'
+  labels:
+  - Unternehmungen
+  - Gym
+  singleton: true
   auto_quantity: true
 - name: Ladekabel
-  categories:
-  - 'Geschäftsreise: Technik'
+  labels:
+  - Geschäftsreise
+  - Technik
+  singleton: true
   auto_quantity: true
 - name: HDMI-Kabel
-  categories:
-  - 'Technik: Laptop'
+  labels:
+  - Technik
+  - Laptop
+  singleton: true
   auto_quantity: true
 - name: Mehrfachstecker
-  categories:
-  - 'Technik: Laptop'
+  labels:
+  - Technik
+  - Laptop
+  singleton: true
   auto_quantity: true
 - name: HDD mit Filmen
-  categories:
-  - 'Technik: Laptop'
-  auto_quantity: true
-- name: Powerbank
-  categories:
-  - 'Technik: Laptop'
-  auto_quantity: true
-- name: Kopfhörer
-  categories:
-  - 'Technik: Handy'
-  auto_quantity: true
-- name: Ladekabel
-  categories:
-  - 'Geschäftsreise: Technik'
+  labels:
+  - Technik
+  - Laptop
+  singleton: true
   auto_quantity: true
 - name: Over ear
-  categories:
-  - 'Technik: Audio'
+  labels:
+  - Technik
+  - Audio
+  singleton: true
   auto_quantity: true
 - name: In ear
-  categories:
-  - 'Technik: Audio'
+  labels:
+  - Technik
+  - Audio
+  singleton: true
   auto_quantity: true
 - name: In ear kabellos
-  categories:
-  - 'Technik: Audio'
-  auto_quantity: true
-- name: Ladekabel
-  categories:
-  - 'Geschäftsreise: Technik'
+  labels:
+  - Technik
+  - Audio
+  singleton: true
   auto_quantity: true
 - name: Tastatur
-  categories:
-  - 'Technik: IPad'
+  labels:
+  - Technik
+  - IPad
+  singleton: true
   auto_quantity: true
 - name: USB-C Adapter
-  categories:
-  - 'Technik: IPad'
-  auto_quantity: true
-- name: Ladekabel
-  categories:
-  - 'Geschäftsreise: Technik'
+  labels:
+  - Technik
+  - IPad
+  singleton: true
   auto_quantity: true
 - name: Kreditkarte
-  categories:
-  - 'Dokumente_Karte: Dokumente/Karten'
+  labels:
+  - Dokumente_Karte
+  - Dokumente/Karten
+  singleton: true
   auto_quantity: true
 - name: Bankkarte
-  categories:
-  - 'Dokumente_Karte: Dokumente/Karten'
+  labels:
+  - Dokumente_Karte
+  - Dokumente/Karten
+  singleton: true
   auto_quantity: true
 - name: Ausweis
-  categories:
-  - 'Dokumente_Karte: Dokumente/Karten'
+  labels:
+  - Dokumente_Karte
+  - Dokumente/Karten
+  singleton: true
   auto_quantity: true
 - name: Reisepass
-  categories:
-  - 'Dokumente_Karte: Dokumente/Karten'
+  labels:
+  - Dokumente_Karte
+  - Dokumente/Karten
+  singleton: true
   auto_quantity: true
 - name: Führerschein
-  categories:
-  - 'Dokumente_Karte: Dokumente/Karten'
+  labels:
+  - Dokumente_Karte
+  - Dokumente/Karten
+  singleton: true
   auto_quantity: true
 - name: Krankenkassenkarte
-  categories:
-  - 'Ferienwohnung: Sonstiges'
+  labels:
+  - Ferienwohnung
+  - Sonstiges
+  singleton: true
   auto_quantity: true
 - name: Tickets
-  categories:
-  - 'Reiseart: Bahn'
+  labels:
+  - Reiseart
+  - Bahn
+  singleton: true
   auto_quantity: true
 - name: Reservierungen
-  categories:
-  - 'Dokumente_Karte: Dokumente/Karten'
+  labels:
+  - Dokumente_Karte
+  - Dokumente/Karten
+  singleton: true
   auto_quantity: true
 - name: Studentenausweis
-  categories:
-  - 'Dokumente_Karte: Dokumente/Karten'
+  labels:
+  - Dokumente_Karte
+  - Dokumente/Karten
+  singleton: true
   auto_quantity: true
 - name: Jugendherbergeausweis
-  categories:
-  - 'Dokumente_Karte: Dokumente/Karten'
+  labels:
+  - Dokumente_Karte
+  - Dokumente/Karten
+  singleton: true
   auto_quantity: true
 - name: Zeitschrift
-  categories:
-  - 'Dokumente_Karte: Unterhaltung'
+  labels:
+  - Dokumente_Karte
+  - Unterhaltung
+  singleton: true
   auto_quantity: true
 - name: Email-Laptop
-  categories:
-  - 'Geschäftsreise: Technik'
-  auto_quantity: true
-- name: Ladekabel
-  categories:
-  - 'Geschäftsreise: Technik'
+  labels:
+  - Geschäftsreise
+  - Technik
+  singleton: true
   auto_quantity: true
 - name: Unterlagen
-  categories:
-  - 'Geschäftsreise: Technik'
+  labels:
+  - Geschäftsreise
+  - Technik
+  singleton: true
   auto_quantity: true
 - name: Handy
-  categories:
-  - 'Geschäftsreise: Technik'
+  labels:
+  - Geschäftsreise
+  - Technik
+  singleton: true
   auto_quantity: true
 - name: Yubi-Key
-  categories:
-  - 'Geschäftsreise: Technik'
-  auto_quantity: true
-- name: Hemd
-  categories:
-  - 'Geschäftsreise: Klamotten'
+  labels:
+  - Geschäftsreise
+  - Technik
+  singleton: true
   auto_quantity: true
 - name: Sakko
-  categories:
-  - 'Geschäftsreise: Klamotten'
+  labels:
+  - Geschäftsreise
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: Gute Hose
-  categories:
-  - 'Geschäftsreise: Klamotten'
+  labels:
+  - Geschäftsreise
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: Airbus-Polo
-  categories:
-  - 'Geschäftsreise: Klamotten'
+  labels:
+  - Geschäftsreise
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: Weißes Tshirt
-  categories:
-  - 'Geschäftsreise: Klamotten'
+  labels:
+  - Geschäftsreise
+  - Klamotten
+  singleton: true
   auto_quantity: true
 - name: Badge
-  categories:
-  - 'Geschäftsreise: Dokumente'
+  labels:
+  - Geschäftsreise
+  - Dokumente
+  singleton: true
   auto_quantity: true
 - name: Bargeld (Landeswährung)
-  categories:
-  - 'Ausland: Handgepäck'
+  labels:
+  - Ausland
+  - Handgepäck
+  singleton: true
   quantity: 5
   auto_quantity: false
 - name: Steckdosenadapter
-  categories:
-  - 'Ausland: Ausland'
+  labels:
+  - Ausland
+  singleton: true
   auto_quantity: true
 - name: Führerschein international
-  categories:
-  - 'Ausland: Karten'
+  labels:
+  - Ausland
+  - Karten
+  singleton: true
   auto_quantity: true
 - name: Auslandreiseversicherung
-  categories:
-  - 'Ausland: Karten'
+  labels:
+  - Ausland
+  - Karten
+  singleton: true
   auto_quantity: true
 - name: Impfpass
-  categories:
-  - 'Ausland: Karten'
+  labels:
+  - Ausland
+  - Karten
+  singleton: true
   auto_quantity: true
 - name: Unterhose
-  categories:
-  - 'Ausland: Handgepäck'
-  auto_quantity: true
-- name: Zahnbürste
-  categories:
-  - 'Ausland: Handgepäck'
-  auto_quantity: true
-- name: Zahnpasta
-  categories:
-  - 'Ausland: Handgepäck'
-  auto_quantity: true
-- name: T-Shirt
-  categories:
-  - 'Ausland: Handgepäck'
+  labels:
+  - Ausland
+  - Handgepäck
+  singleton: true
   auto_quantity: true
 - name: Kleines Handtuch
-  categories:
-  - 'Ausland: Handgepäck'
+  labels:
+  - Ausland
+  - Handgepäck
+  singleton: true
   quantity: 1
   auto_quantity: false
 - name: Nackenkissen
-  categories:
-  - 'Reiseart: Flugzeug'
-  auto_quantity: true
-- name: Ersatzschlüssel
-  categories:
-  - 'Reiseart: Auto'
+  labels:
+  - Reiseart
+  - Flugzeug
+  singleton: true
   auto_quantity: true
 - name: Sonnenbrill
-  categories:
-  - 'Reiseart: Auto'
+  labels:
+  - Reiseart
+  - Auto
+  singleton: true
   auto_quantity: true
 - name: Autobrille
-  categories:
-  - 'Reiseart: Auto'
+  labels:
+  - Reiseart
+  - Auto
+  singleton: true
   auto_quantity: true
 - name: Leinenschalfsack
-  categories:
-  - 'Reiseart: Hütte'
-  auto_quantity: true
-- name: Hausschuhe
-  categories:
-  - 'Reiseart: Hütte'
+  labels:
+  - Reiseart
+  - Hütte
+  singleton: true
   auto_quantity: true
 - name: FIPS Ausweis
-  categories:
-  - 'Reiseart: Bahn'
+  labels:
+  - Reiseart
+  - Bahn
+  singleton: true
   auto_quantity: true
 - name: Bahn Ausweis
-  categories:
-  - 'Reiseart: Bahn'
-  auto_quantity: true
-- name: Tickets
-  categories:
-  - 'Reiseart: Bahn'
+  labels:
+  - Reiseart
+  - Bahn
+  singleton: true
   auto_quantity: true
 weekdays: 6
 travel_style: backpacker
@@ -906,4 +1122,4 @@ modifiers:
     multiplier: 0.9
   - name: snowy
     multiplier: 1.8
-last_trip_file: /tmp/pack-liste-verify/ref.yaml
+last_trip_file: /tmp/vibe-scratchpad-1abb478c-c_yd4xd3/rt-trip.yaml

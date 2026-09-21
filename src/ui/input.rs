@@ -10,7 +10,7 @@ use std::io::{self, stdout};
 use std::path::PathBuf;
 
 use crate::config::trip_file::{TripFile, TripItem};
-use crate::models::item::{QuantityBuffer, category_layers};
+use crate::models::item::QuantityBuffer;
 use crate::models::weekdays::Weekdays;
 use crate::quantity::calculation::QuantityCalculation;
 use crate::ui::config_io::{
@@ -88,10 +88,10 @@ impl App {
             if let Some(mut trip) = TripFile::load(&trip_file_path)? {
                 resumed = true;
                 // Reconcile selected items against the current input config
-                let config_items: Vec<(String, Vec<String>)> = packing_list
+                let config_items: Vec<(String, Vec<String>, bool)> = packing_list
                     .items
                     .iter()
-                    .map(|item| (item.name.clone(), item.categories.clone()))
+                    .map(|item| (item.name.clone(), item.labels.clone(), item.singleton))
                     .collect();
                 trip.reconcile(&config_items);
 
@@ -141,8 +141,8 @@ impl App {
             weather,
             modifiers: trip_params.modifiers,
             focus: Focus::TripFile,
-            collapsed_categories: Vec::new(),
-            collapsed_groups: Vec::new(),
+            collapsed_labels: Vec::new(),
+            occurrence_overrides: std::collections::BTreeMap::new(),
             selected_index: 0,
             focus_side: FocusSide::Left,
             fullscreen: false,
@@ -187,7 +187,6 @@ impl App {
     /// Serialize the current state to the config file.
     pub(crate) fn save_config(&self) -> Result<()> {
         let config = AppConfig {
-            categories: self.get_all_categories(),
             items: self
                 .draw_state
                 .packing_list
@@ -197,7 +196,8 @@ impl App {
                     let auto = item.auto_quantity;
                     SavedItem {
                         name: item.name.clone(),
-                        categories: item.categories.clone(),
+                        labels: item.labels.clone(),
+                        singleton: item.singleton,
                         quantity: if auto { None } else { Some(item.quantity) },
                         auto_quantity: auto,
                         // Per-item modifiers (spec 010): the rate is
@@ -261,7 +261,8 @@ impl App {
                 .filter(|item| item.selected)
                 .map(|item| TripItem {
                     name: item.name.clone(),
-                    category: item.primary_category().to_string(),
+                    labels: item.labels.clone(),
+                    singleton: item.singleton,
                     packed: item.packed,
                     // The quantity snapshot (spec 012): whatever the
                     // user sees — calculated, fixed, or manually set
@@ -290,12 +291,12 @@ impl App {
         };
 
         // Reconcile selected items against the current input config
-        let config_items: Vec<(String, Vec<String>)> = self
+        let config_items: Vec<(String, Vec<String>, bool)> = self
             .draw_state
             .packing_list
             .items
             .iter()
-            .map(|item| (item.name.clone(), item.categories.clone()))
+            .map(|item| (item.name.clone(), item.labels.clone(), item.singleton))
             .collect();
         trip.reconcile(&config_items);
 
@@ -324,18 +325,19 @@ impl App {
         Ok(())
     }
 
-    /// All distinct item categories, sorted.
-    pub(crate) fn get_all_categories(&self) -> Vec<String> {
-        let mut categories: Vec<String> = self
+    /// All distinct item labels, sorted (spec 025): the picker's
+    /// data source.
+    pub(crate) fn all_labels(&self) -> Vec<String> {
+        let mut labels: Vec<String> = self
             .draw_state
             .packing_list
             .items
             .iter()
-            .flat_map(|item| item.categories.iter().cloned())
+            .flat_map(|item| item.labels.iter().cloned())
             .collect();
-        categories.sort();
-        categories.dedup();
-        categories
+        labels.sort();
+        labels.dedup();
+        labels
     }
 
     // Cycle through the configured travel styles (direction: 1 = forward, -1 = backward)
@@ -386,15 +388,15 @@ impl App {
     /// 018): resolve the scope against the cursor when needed, then
     /// recalculate; failures surface in the status line.
     pub(crate) fn recalculate_current_scope(&mut self, scope: RecalculateScope) -> Result<()> {
-        // On a category header, the item scope means the header's
-        // category (EC-001: R and Ctrl+R are equivalent there)
+        // On a label header, the item scope means the header's label
+        // (EC-001: R and Ctrl+R are equivalent there)
         let scope = match scope {
             RecalculateScope::Item(idx) => match self.draw_state.packing_list.items.get(idx) {
                 Some(item) => {
                     if self.draw_state.cursor_item_index().is_some() {
                         RecalculateScope::Item(idx)
                     } else {
-                        RecalculateScope::Category(item.primary_category().to_string())
+                        RecalculateScope::Label(item.labels.first().cloned().unwrap_or_default())
                     }
                 }
                 None => return Ok(()),
@@ -535,18 +537,17 @@ impl App {
             let scope = if key.modifiers.contains(M::SHIFT) {
                 RecalculateScope::All
             } else {
-                // The cursor's category-level scope (EC-001): the
-                // item's sub-category, the header's sub-category, or
-                // the whole group on a group header (spec 024)
+                // The cursor's label-level scope (EC-001): the item's
+                // first label, or the header's label (spec 025)
                 match self.draw_state.cursor_recalc_scope() {
-                    Some(RecalculateScope::Item(idx)) => RecalculateScope::Category(
+                    Some(RecalculateScope::Item(idx)) => RecalculateScope::Label(
                         self.draw_state.packing_list.items[idx]
-                            .primary_category()
-                            .to_string(),
+                            .labels
+                            .first()
+                            .cloned()
+                            .unwrap_or_default(),
                     ),
-                    Some(scope @ (RecalculateScope::Category(_) | RecalculateScope::Group(_))) => {
-                        scope
-                    }
+                    Some(scope @ RecalculateScope::Label(_)) => scope,
                     _ => return Ok(false),
                 }
             };
@@ -656,14 +657,14 @@ impl App {
         self.draw_state.cursor_item_index()
     }
 
-    // The category the cursor is on (header row or one of its items)
-    pub(crate) fn current_category(&self) -> Option<String> {
-        self.draw_state.cursor_category()
+    // The label the cursor is on (a header row or an item's first label)
+    pub(crate) fn current_label(&self) -> Option<String> {
+        self.draw_state.cursor_label()
     }
 
-    /// Toggle collapse of the category under the cursor.
-    pub(crate) fn toggle_category_collapse(&mut self) {
-        self.draw_state.toggle_category_collapse();
+    /// Toggle collapse of the label under the cursor.
+    pub(crate) fn toggle_label_collapse(&mut self) {
+        self.draw_state.toggle_label_collapse();
     }
 
     /// Toggle selection of the item under the cursor.
@@ -671,9 +672,9 @@ impl App {
         self.draw_state.toggle_item_selection();
     }
 
-    /// Toggle selection of the cursor's whole category.
-    pub(crate) fn toggle_category_selection(&mut self) {
-        self.draw_state.toggle_category_selection();
+    /// Toggle selection of the cursor's whole label.
+    pub(crate) fn toggle_label_selection(&mut self) {
+        self.draw_state.toggle_label_selection();
     }
 
     /// Toggle the packed state of the item under the cursor (right
@@ -689,38 +690,25 @@ impl App {
         let Some(item_index) = self.current_item_index() else {
             return;
         };
-        let category = self.draw_state.packing_list.items[item_index]
-            .primary_category()
-            .to_string();
-        let (group, _) = category_layers(&category);
+        let item_labels = self.draw_state.packing_list.items[item_index]
+            .labels
+            .clone();
 
-        // Collapse everything, then expand only the cursor item's
-        // sub-category AND its group (spec 024)
-        let all_categories: Vec<String> = self
+        // Collapse every label, then expand only the cursor item's
+        // labels (spec 025)
+        let all_labels: Vec<String> = self
             .draw_state
             .packing_list
             .items
             .iter()
-            .flat_map(|item| item.categories.iter().cloned())
+            .flat_map(|item| item.labels.iter().cloned())
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
-        self.draw_state.collapsed_categories = all_categories;
+        self.draw_state.collapsed_labels = all_labels;
         self.draw_state
-            .collapsed_categories
-            .retain(|c| c != &category);
-        let all_groups: Vec<String> = self
-            .draw_state
-            .packing_list
-            .items
-            .iter()
-            .flat_map(|item| item.categories.iter().cloned())
-            .map(|c| category_layers(&c).0.to_string())
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        self.draw_state.collapsed_groups = all_groups;
-        self.draw_state.collapsed_groups.retain(|g| g != group);
+            .collapsed_labels
+            .retain(|l| !item_labels.contains(l));
     }
 }
 

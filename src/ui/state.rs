@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use crate::config::modifiers::ModifiersConfig;
-use crate::models::item::{Item, QuantityBuffer, category_layers};
+use crate::models::item::{Item, QuantityBuffer};
 use crate::models::packing_list::PackingList;
 use crate::models::weekdays::Weekdays;
 use crate::quantity::calculation::QuantityCalculation;
@@ -61,7 +61,10 @@ impl Focus {
 /// A field of the add/edit item dialog.
 pub(crate) enum InputField {
     Name,
-    Category,
+    /// The labels multi-select + free text (spec 025)
+    Labels,
+    /// The singleton flag (spec 025, US5)
+    Singleton,
     Quantity,
     Mode,
     /// The per-day rate (spec 010)
@@ -74,8 +77,9 @@ impl InputField {
     /// The next field in the dialog's cycle (wrapping).
     pub(crate) fn next(&self) -> Self {
         match self {
-            InputField::Name => InputField::Category,
-            InputField::Category => InputField::Quantity,
+            InputField::Name => InputField::Labels,
+            InputField::Labels => InputField::Singleton,
+            InputField::Singleton => InputField::Quantity,
             InputField::Quantity => InputField::Mode,
             InputField::Mode => InputField::Rate,
             InputField::Rate => InputField::Buffer,
@@ -89,7 +93,7 @@ impl InputField {
         // (Not self.next().cycle_back() — that computes the
         // predecessor of the successor, which is self again.)
         let mut f = *self;
-        for _ in 0..6 {
+        for _ in 0..7 {
             f = f.next();
             if f.next() == *self {
                 return f;
@@ -129,10 +133,18 @@ pub(crate) enum InputMode {
     AddingItem {
         field: InputField,
         name: String,
-        category: String,
+        /// Free-text label entry (spec 025): typed text joins the
+        /// multi-select's set on save
+        label_input: String,
         quantity: String,
-        category_list: Vec<String>,
-        category_index: usize,
+        /// The distinct labels (the picker's data source)
+        label_list: Vec<String>,
+        /// The highlighted picker entry (Left/Right cycles)
+        label_index: usize,
+        /// The multi-select's label set; Space toggles membership
+        selected_labels: Vec<String>,
+        /// The singleton flag (spec 025, US5)
+        singleton: bool,
         /// The per-day rate as dialog text (spec 010)
         rate: String,
         /// The buffer kind and value as dialog text (spec 010):
@@ -148,7 +160,8 @@ pub(crate) enum InputMode {
         index: usize,
         field: InputField,
         name: String,
-        category: String,
+        /// Free-text label entry (spec 025)
+        label_input: String,
         quantity: String,
         /// The per-day rate as dialog text (spec 010)
         rate: String,
@@ -158,11 +171,14 @@ pub(crate) enum InputMode {
         /// Quantity mode carried from the item; toggled in the dialog's
         /// Mode field and written back on save
         auto_quantity: bool,
-        category_list: Vec<String>,
-        category_index: usize,
-        /// The item's category memberships; Space toggles the highlighted
-        /// entry in the category dropdown
-        selected_categories: Vec<String>,
+        /// The distinct labels (the picker's data source)
+        label_list: Vec<String>,
+        /// The highlighted picker entry (Left/Right cycles)
+        label_index: usize,
+        /// The item's labels; Space toggles the highlighted entry
+        selected_labels: Vec<String>,
+        /// The singleton flag (spec 025, US5)
+        singleton: bool,
     },
     ConfirmDelete {
         index: usize,
@@ -181,7 +197,8 @@ pub(crate) enum InputMode {
 pub(crate) struct PendingEdit {
     pub(crate) index: usize,
     pub(crate) name: String,
-    pub(crate) categories: Vec<String>,
+    pub(crate) labels: Vec<String>,
+    pub(crate) singleton: bool,
     pub(crate) quantity: String,
     pub(crate) auto_quantity: bool,
     /// The per-day rate as dialog text (spec 010)
@@ -200,10 +217,12 @@ impl InputMode {
             InputMode::AddingItem {
                 field,
                 name,
-                category,
+                label_input,
                 quantity,
-                category_list,
-                category_index,
+                label_list,
+                label_index,
+                selected_labels,
+                singleton,
                 rate,
                 buffer_kind,
                 buffer_value,
@@ -211,12 +230,13 @@ impl InputMode {
             } => Some(PopupFields {
                 field: *field,
                 name,
-                category,
+                label_input,
                 quantity,
                 auto_quantity: Some(*auto_quantity),
-                category_list,
-                category_index: *category_index,
-                selected_categories: None,
+                label_list,
+                label_index: *label_index,
+                selected_labels,
+                singleton: *singleton,
                 rate,
                 buffer_kind: *buffer_kind,
                 buffer_value,
@@ -224,12 +244,13 @@ impl InputMode {
             InputMode::EditingItem {
                 field,
                 name,
-                category,
+                label_input,
                 quantity,
                 auto_quantity,
-                category_list,
-                category_index,
-                selected_categories,
+                label_list,
+                label_index,
+                selected_labels,
+                singleton,
                 rate,
                 buffer_kind,
                 buffer_value,
@@ -237,12 +258,13 @@ impl InputMode {
             } => Some(PopupFields {
                 field: *field,
                 name,
-                category,
+                label_input,
                 quantity,
                 auto_quantity: Some(*auto_quantity),
-                category_list,
-                category_index: *category_index,
-                selected_categories: Some(selected_categories),
+                label_list,
+                label_index: *label_index,
+                selected_labels,
+                singleton: *singleton,
                 rate,
                 buffer_kind: *buffer_kind,
                 buffer_value,
@@ -265,15 +287,19 @@ pub(crate) enum AppState {
 pub(crate) struct PopupFields<'a> {
     pub(crate) field: InputField,
     pub(crate) name: &'a str,
-    pub(crate) category: &'a str,
+    /// The free-text label entry (spec 025)
+    pub(crate) label_input: &'a str,
     pub(crate) quantity: &'a str,
-    /// Quantity mode shown in the edit dialog's Mode field
+    /// Quantity mode shown in the dialog's Mode field
     pub(crate) auto_quantity: Option<bool>,
-    pub(crate) category_list: &'a [String],
-    pub(crate) category_index: usize,
-    /// The edit dialog's membership set (Space multi-select); None in
-    /// the add dialog, which has a single category
-    pub(crate) selected_categories: Option<&'a Vec<String>>,
+    /// The distinct labels (the picker's data source)
+    pub(crate) label_list: &'a [String],
+    /// The highlighted picker entry
+    pub(crate) label_index: usize,
+    /// The multi-select's label set (Space toggles)
+    pub(crate) selected_labels: &'a [String],
+    /// The singleton flag (spec 025, US5)
+    pub(crate) singleton: bool,
     /// The per-day rate as dialog text (spec 010)
     pub(crate) rate: &'a str,
     /// The buffer kind being edited (spec 010)
@@ -306,10 +332,13 @@ pub(crate) struct AppDrawState {
     pub(crate) weather: String,
     pub(crate) modifiers: ModifiersConfig,
     pub(crate) focus: Focus,
-    pub(crate) collapsed_categories: Vec<String>,
-    /// Collapsed top-layer groups (spec 024): the part before the
-    /// first ": ". Session state, not persisted.
-    pub(crate) collapsed_groups: Vec<String>,
+    /// Collapsed labels (spec 025): session state, not persisted.
+    pub(crate) collapsed_labels: Vec<String>,
+    /// Per-occurrence toggle overrides for NON-singleton multi-label
+    /// items (spec 025, US5): (item index, label) -> the overridden
+    /// state. The effective occurrence state = the override if
+    /// present, else the item's own. Session state, not persisted.
+    pub(crate) occurrence_overrides: std::collections::BTreeMap<(usize, String), bool>,
     pub(crate) selected_index: usize,
     pub(crate) focus_side: FocusSide,
     /// Fullscreen compiled-list view (spec 007): presentation-only;
@@ -403,29 +432,9 @@ pub(crate) enum ModifierField {
 // A navigable row of a panel: a category header or an item
 #[derive(Clone, Debug)]
 pub(crate) enum PanelRow {
-    /// A top-layer group header (spec 024): the part before the first
-    /// ": " of its categories
-    Group(String),
-    /// A sub-category header; the payload is the FULL category string
-    /// (the identity for collapse/selection/recalculation)
-    Category(String),
+    /// A flat label header (spec 025): one per distinct label
+    Label(String),
     Item(usize), // index into packing_list.items
-}
-
-/// Group the given items by category, in sorted category order. Each
-/// entry carries the item's index and a reference to the item.
-pub(crate) fn group_items_by_category<'a>(
-    items: impl Iterator<Item = (usize, &'a Item)>,
-    category_of: impl Fn(&'a Item) -> Vec<String>,
-) -> std::collections::BTreeMap<String, Vec<(usize, &'a Item)>> {
-    let mut map: std::collections::BTreeMap<String, Vec<(usize, &'a Item)>> =
-        std::collections::BTreeMap::new();
-    for (idx, item) in items {
-        for category in category_of(item) {
-            map.entry(category).or_default().push((idx, item));
-        }
-    }
-    map
 }
 
 /// The visible slice of a panel's rows with a sticky category header:
@@ -449,34 +458,18 @@ pub(crate) fn sticky_rows(
     if scroll == 0 || visible.is_empty() {
         return visible;
     }
-    // Pin the OUTERMOST scrolled-off header (spec 024, research R5):
-    // an Item row pins its nearest off-screen header (sub-category or
-    // group); a Category row pins its group when that group is also
-    // off-screen. One pinned row maximum.
+    // Pin the scrolled-off label header (spec 025): an Item row
+    // pins its nearest off-screen header. One pinned row maximum.
     let pin_target = match &visible[0].1 {
         PanelRow::Item(_) => rows[..scroll]
             .iter()
             .enumerate()
             .rev()
             .find_map(|(pos, r)| match r {
-                PanelRow::Group(g) => Some((pos, PanelRow::Group(g.clone()))),
-                PanelRow::Category(c) => Some((pos, PanelRow::Category(c.clone()))),
+                PanelRow::Label(l) => Some((pos, PanelRow::Label(l.clone()))),
                 _ => None,
             }),
-        PanelRow::Category(c) => {
-            // Pin only the enclosing group, and only when it is
-            // off-screen above
-            let (top, _) = category_layers(c);
-            rows[..scroll]
-                .iter()
-                .enumerate()
-                .rev()
-                .find_map(|(pos, r)| match r {
-                    PanelRow::Group(g) if *g == top => Some((pos, PanelRow::Group(g.clone()))),
-                    _ => None,
-                })
-        }
-        PanelRow::Group(_) => None,
+        PanelRow::Label(_) => None,
     };
     if let Some((pos, row)) = pin_target {
         // The pin displaces the window's last row. When the window
@@ -497,10 +490,8 @@ pub(crate) fn sticky_rows(
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum RecalculateScope {
     Item(usize),
-    Category(String),
-    /// A top-layer group (spec 024): every item whose any category's
-    /// top layer matches
-    Group(String),
+    /// A label (spec 025): every item carrying it
+    Label(String),
     All,
 }
 
@@ -521,46 +512,28 @@ impl AppDrawState {
     /// The left panel's rows in display order: each category header,
     /// followed by its items unless the category is collapsed.
     pub(crate) fn left_rows(&self) -> Vec<PanelRow> {
-        // Rows of the left panel in display order (spec 024): each
-        // top-layer group header, then its sub-category headers with
-        // their items — unless the group or the sub-category is
-        // collapsed. Separator-free categories render as a group with
-        // their items directly beneath (no sub-category row).
-        let categories_map =
-            group_items_by_category(self.packing_list.items.iter().enumerate(), |item| {
-                item.categories.clone()
-            });
-
-        // Group the categories by top layer, preserving sorted order
-        let mut group_order: Vec<String> = Vec::new();
-        let mut groups: std::collections::BTreeMap<String, Vec<&String>> =
-            std::collections::BTreeMap::new();
-        for category in categories_map.keys() {
-            let (top, _) = category_layers(category);
-            if !groups.contains_key(top) {
-                group_order.push(top.to_string());
-            }
-            groups.entry(top.to_string()).or_default().push(category);
-        }
+        // Rows of the left panel in display order (spec 025): one
+        // flat header per distinct label (sorted), the items carrying
+        // it beneath — an item appears under EVERY label it carries.
+        // A collapsed label contributes only its header.
+        let labels: Vec<String> = self
+            .packing_list
+            .items
+            .iter()
+            .flat_map(|item| item.labels.iter().cloned())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
 
         let mut rows = Vec::new();
-        for top in &group_order {
-            rows.push(PanelRow::Group(top.clone()));
-            if self.collapsed_groups.contains(top) {
+        for label in &labels {
+            rows.push(PanelRow::Label(label.clone()));
+            if self.collapsed_labels.contains(label) {
                 continue;
             }
-            for category in &groups[top] {
-                let has_sub = category_layers(category).1.is_some();
-                // A separator-free category has no sub-category row:
-                // its items sit directly beneath the group
-                let sub_collapsed = self.collapsed_categories.contains(*category);
-                if has_sub {
-                    rows.push(PanelRow::Category((*category).clone()));
-                }
-                if !sub_collapsed {
-                    for (idx, _) in &categories_map[*category] {
-                        rows.push(PanelRow::Item(*idx));
-                    }
+            for (idx, item) in self.packing_list.items.iter().enumerate() {
+                if item.has_label(label) {
+                    rows.push(PanelRow::Item(idx));
                 }
             }
         }
@@ -574,37 +547,25 @@ impl AppDrawState {
     /// items. The cursor walks the same rows the panel renders, so
     /// every header is reachable by navigation.
     pub(crate) fn right_rows(&self) -> Vec<PanelRow> {
-        let categories_map = group_items_by_category(
-            self.packing_list
-                .items
-                .iter()
-                .enumerate()
-                .filter(|(_, item)| item.selected),
-            |item| vec![item.primary_category().to_string()],
-        );
-
-        // Group the categories by top layer, preserving sorted order
-        let mut group_order: Vec<String> = Vec::new();
-        let mut groups: std::collections::BTreeMap<String, Vec<&String>> =
-            std::collections::BTreeMap::new();
-        for category in categories_map.keys() {
-            let (top, _) = category_layers(category);
-            if !groups.contains_key(top) {
-                group_order.push(top.to_string());
-            }
-            groups.entry(top.to_string()).or_default().push(category);
-        }
+        // The right panel's rows (spec 025): the same flat label
+        // grouping over the selected items. The cursor walks the same
+        // rows the panel renders, so every header is reachable.
+        let labels: Vec<String> = self
+            .packing_list
+            .items
+            .iter()
+            .filter(|item| item.selected)
+            .flat_map(|item| item.labels.iter().cloned())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
 
         let mut rows = Vec::new();
-        for top in &group_order {
-            rows.push(PanelRow::Group(top.clone()));
-            for category in &groups[top] {
-                let has_sub = category_layers(category).1.is_some();
-                if has_sub {
-                    rows.push(PanelRow::Category((*category).clone()));
-                }
-                for (idx, _) in &categories_map[*category] {
-                    rows.push(PanelRow::Item(*idx));
+        for label in &labels {
+            rows.push(PanelRow::Label(label.clone()));
+            for (idx, item) in self.packing_list.items.iter().enumerate() {
+                if item.selected && item.has_label(label) {
+                    rows.push(PanelRow::Item(idx));
                 }
             }
         }
@@ -629,18 +590,13 @@ impl AppDrawState {
         }
     }
 
-    // The category the cursor is on (header row or one of its items).
-    // A group header resolves to the group's name (the top layer).
-    pub(crate) fn cursor_category(&self) -> Option<String> {
+    // The label the cursor is on (a header row, or the first label
+    // of the item under the cursor).
+    pub(crate) fn cursor_label(&self) -> Option<String> {
         let rows = self.active_rows();
         match rows.get(self.selected_index) {
-            Some(PanelRow::Group(g)) => Some(g.clone()),
-            Some(PanelRow::Category(c)) => Some(c.clone()),
-            Some(PanelRow::Item(index)) => Some(
-                self.packing_list.items[*index]
-                    .primary_category()
-                    .to_string(),
-            ),
+            Some(PanelRow::Label(l)) => Some(l.clone()),
+            Some(PanelRow::Item(index)) => self.packing_list.items[*index].labels.first().cloned(),
             None => None,
         }
     }
@@ -648,225 +604,162 @@ impl AppDrawState {
     // Collapse (true) or expand (false) the category under the cursor.
     // When collapsing, the cursor moves to the category's header row so it
     // stays visible.
-    /// The recalculate scope for the cursor's row (spec 024): a Group
-    /// row resolves to the group scope; a Category row to its
-    /// full-string category; an item to its primary category.
+    /// The recalculate scope for the cursor's row (spec 025): a
+    /// Label row resolves to the label scope; an item to itself.
     pub(crate) fn cursor_recalc_scope(&self) -> Option<RecalculateScope> {
         let rows = self.active_rows();
         match rows.get(self.selected_index) {
-            Some(PanelRow::Group(g)) => Some(RecalculateScope::Group(g.clone())),
-            Some(PanelRow::Category(c)) => Some(RecalculateScope::Category(c.clone())),
+            Some(PanelRow::Label(l)) => Some(RecalculateScope::Label(l.clone())),
             Some(PanelRow::Item(index)) => Some(RecalculateScope::Item(*index)),
             None => None,
         }
     }
 
-    // Collapse (true) or expand (false) the header under the cursor,
-    // resolving by row (spec 024): a Group row toggles the group
-    // (hiding its whole sub-tree); a Category row toggles the
-    // sub-category (hiding its items only); an item resolves to its
-    // primary category's sub-category. When collapsing, the cursor
-    // moves to the header it collapsed so it stays visible.
-    pub(crate) fn set_category_collapsed(&mut self, collapsed: bool) {
-        let rows = self.active_rows();
-        let Some(row) = rows.get(self.selected_index) else {
+    // Collapse (true) or expand (false) the label under the cursor
+    // (spec 025): a Label row (or an item's first label) toggles the
+    // label's collapse. When collapsing, the cursor moves to the
+    // label's header row so it stays visible.
+    pub(crate) fn set_label_collapsed(&mut self, collapsed: bool) {
+        let Some(label) = self.cursor_label() else {
             return;
         };
-        // The header this action targets: (name, is_group)
-        let (target, is_group) = match row {
-            PanelRow::Group(g) => (g.clone(), true),
-            PanelRow::Category(c) => (c.clone(), false),
-            PanelRow::Item(index) => (
-                self.packing_list.items[*index]
-                    .primary_category()
-                    .to_string(),
-                false,
-            ),
-        };
-
-        if is_group {
-            // A group whose categories are all separator-free has no
-            // sub-level: collapsing it collapses each category's
-            // items (the group row is their only header, spec 024)
-            let group_categories: Vec<String> = self
-                .packing_list
-                .items
-                .iter()
-                .flat_map(|item| item.categories.iter().cloned())
-                .filter(|c| category_layers(c).0 == target)
-                .collect();
-            let has_sub = group_categories
-                .iter()
-                .any(|c| category_layers(c).1.is_some());
-            if !has_sub {
-                if collapsed {
-                    for category in &group_categories {
-                        if !self.collapsed_categories.contains(category) {
-                            self.collapsed_categories.push(category.clone());
-                        }
-                    }
-                    // The cursor stays on the group's header row
-                    let rows = self.active_rows();
-                    if let Some(row) = rows
-                        .iter()
-                        .position(|r| matches!(r, PanelRow::Group(g) if *g == target))
-                    {
-                        self.selected_index = row;
-                    }
-                } else {
-                    for category in &group_categories {
-                        self.collapsed_categories.retain(|c| c != category);
-                    }
-                }
-                return;
-            }
-            if collapsed {
-                if !self.collapsed_groups.contains(&target) {
-                    self.collapsed_groups.push(target.clone());
-                }
-                // The cursor stays on the group's header row
-                let rows = self.active_rows();
-                if let Some(row) = rows
-                    .iter()
-                    .position(|r| matches!(r, PanelRow::Group(g) if *g == target))
-                {
-                    self.selected_index = row;
-                }
-            } else {
-                self.collapsed_groups.retain(|g| g != &target);
-            }
-            return;
-        }
-
         if collapsed {
-            if !self.collapsed_categories.contains(&target) {
-                self.collapsed_categories.push(target.clone());
+            if !self.collapsed_labels.contains(&label) {
+                self.collapsed_labels.push(label.clone());
             }
-            // Move the cursor to the category's header row: the
-            // sub-category row when one exists, otherwise the group
-            // header (separator-free categories have no sub-row)
+            // Move the cursor to the label's header row
             let rows = self.active_rows();
-            let header_row = rows
+            if let Some(row) = rows
                 .iter()
-                .position(|r| matches!(r, PanelRow::Category(c) if *c == target))
-                .or_else(|| {
-                    let (top, _) = category_layers(&target);
-                    rows.iter()
-                        .position(|r| matches!(r, PanelRow::Group(g) if *g == top))
-                });
-            if let Some(row) = header_row {
+                .position(|r| matches!(r, PanelRow::Label(l) if *l == label))
+            {
                 self.selected_index = row;
             }
         } else {
-            self.collapsed_categories.retain(|c| c != &target);
+            self.collapsed_labels.retain(|l| l != &label);
         }
     }
 
-    /// Toggle collapse of the header under the cursor (spec 024):
-    /// the group level on a Group row, the sub-category level on a
-    /// Category row or an item. A group whose categories are all
-    /// separator-free collapses at the category level (its group
-    /// row is the only header those categories have).
-    pub(crate) fn toggle_category_collapse(&mut self) {
-        let rows = self.active_rows();
-        let Some(row) = rows.get(self.selected_index) else {
+    /// Toggle collapse of the label under the cursor (spec 025).
+    pub(crate) fn toggle_label_collapse(&mut self) {
+        let Some(label) = self.cursor_label() else {
             return;
         };
-        let collapsed = match row {
-            PanelRow::Group(g) => {
-                // Separator-free group: the category level is the
-                // effective collapse state
-                let has_sub = self.packing_list.items.iter().any(|item| {
-                    item.categories
-                        .iter()
-                        .any(|c| category_layers(c).0 == *g && category_layers(c).1.is_some())
-                });
-                if has_sub {
-                    self.collapsed_groups.contains(g)
-                } else {
-                    self.packing_list.items.iter().any(|item| {
-                        let primary = item.primary_category();
-                        category_layers(primary).0 == *g
-                            && self.collapsed_categories.iter().any(|c| c == primary)
-                    })
-                }
-            }
-            PanelRow::Category(c) => self.collapsed_categories.contains(c),
-            PanelRow::Item(index) => {
-                let primary = self.packing_list.items[*index].primary_category();
-                self.collapsed_categories.iter().any(|c| c == primary)
-            }
-        };
-        self.set_category_collapsed(!collapsed);
+        let collapsed = self.collapsed_labels.contains(&label);
+        self.set_label_collapsed(!collapsed);
     }
 
-    /// Toggle selection of the item under the cursor.
+    /// The effective selection state of an item's occurrence under a
+    /// label (spec 025, US5): the override if present, else the
+    /// item's own state.
+    pub(crate) fn effective_selected(&self, item_index: usize, label: &str) -> bool {
+        match self
+            .occurrence_overrides
+            .get(&(item_index, label.to_string()))
+        {
+            Some(state) => *state,
+            None => self.packing_list.items[item_index].selected,
+        }
+    }
+
+    /// The effective packed state of an item's occurrence under a
+    /// label (spec 025, US5): the override if present, else the
+    /// item's own state.
+    pub(crate) fn effective_packed(&self, item_index: usize, label: &str) -> bool {
+        match self
+            .occurrence_overrides
+            .get(&(item_index, label.to_string()))
+        {
+            Some(state) => *state,
+            None => self.packing_list.items[item_index].packed,
+        }
+    }
+
+    /// Toggle the selection of the item occurrence under the cursor
+    /// (spec 025, US5): a SINGLETON flips the item's own state and
+    /// clears its overrides (every label follows — FR-011); a
+    /// non-singleton writes the per-occurrence override (FR-012).
     pub(crate) fn toggle_item_selection(&mut self) {
-        // Toggle selection of the currently selected item
-        if let Some(item_index) = self.cursor_item_index() {
+        let Some((item_index, label)) = self.cursor_occurrence() else {
+            return;
+        };
+        if self.packing_list.items[item_index].singleton {
             let item = &mut self.packing_list.items[item_index];
             item.selected = !item.selected;
+            // Synchronized: no per-occurrence divergence remains
+            self.occurrence_overrides
+                .retain(|(idx, _), _| *idx != item_index);
+        } else {
+            let now = !self.effective_selected(item_index, &label);
+            self.occurrence_overrides.insert((item_index, label), now);
         }
     }
 
-    /// Toggle selection of every item in the cursor's category, then
-    /// collapse the group when added and expand it when removed.
-    pub(crate) fn toggle_category_selection(&mut self) {
-        // Toggle selection of the header under the cursor, resolving
-        // by row (spec 024): a Group row flips every item whose any
-        // category's top layer matches; a Category row (or an item)
-        // flips the full-string category's items. The group collapses
-        // when items were added to the trip and expands when removed.
-        let rows = self.active_rows();
-        let Some(row) = rows.get(self.selected_index) else {
+    /// Toggle the packed state of the item occurrence under the
+    /// cursor (right panel only; spec 025, US5): a SINGLETON flips
+    /// the item's own state and clears its overrides (FR-011); a
+    /// non-singleton writes the per-occurrence override (FR-012).
+    pub(crate) fn toggle_item_packed(&mut self) {
+        if self.focus_side != FocusSide::Right {
+            return;
+        }
+        let Some((item_index, label)) = self.cursor_occurrence() else {
             return;
         };
-        let (group, category) = match row {
-            PanelRow::Group(g) => (Some(g.clone()), None),
-            PanelRow::Category(c) => (None, Some(c.clone())),
-            PanelRow::Item(index) => (
-                None,
-                Some(
-                    self.packing_list.items[*index]
-                        .primary_category()
-                        .to_string(),
-                ),
-            ),
-        };
+        if self.packing_list.items[item_index].singleton {
+            let item = &mut self.packing_list.items[item_index];
+            item.packed = !item.packed;
+            self.occurrence_overrides
+                .retain(|(idx, _), _| *idx != item_index);
+        } else {
+            let now = !self.effective_packed(item_index, &label);
+            self.occurrence_overrides.insert((item_index, label), now);
+        }
+    }
 
-        let matches = |item: &Item| match (&group, &category) {
-            (Some(top), _) => item.categories.iter().any(|c| category_layers(c).0 == *top),
-            (None, Some(c)) => item.in_category(c),
-            (None, None) => false,
-        };
+    /// The (item, label) occurrence under the cursor: the label of the
+    /// row's group context. On a Label header there is no occurrence
+    /// (None); on an Item row, the label of the group it appears in.
+    pub(crate) fn cursor_occurrence(&self) -> Option<(usize, String)> {
+        let rows = self.active_rows();
+        let mut current_label: Option<String> = None;
+        for (pos, row) in rows.iter().enumerate().take(self.selected_index + 1) {
+            match row {
+                PanelRow::Label(l) => current_label = Some(l.clone()),
+                PanelRow::Item(index) if pos == self.selected_index => {
+                    return current_label.map(|l| (*index, l));
+                }
+                _ => {}
+            }
+        }
+        None
+    }
 
+    /// Toggle selection of every item carrying the cursor's label,
+    /// then collapse the label when items were added to the trip and
+    /// expand it when removed (spec 025).
+    pub(crate) fn toggle_label_selection(&mut self) {
+        let Some(label) = self.cursor_label() else {
+            return;
+        };
         let was_selected = self
             .packing_list
             .items
             .iter()
-            .any(|item| matches(item) && item.selected);
+            .any(|item| item.has_label(&label) && item.selected);
 
-        for item in &mut self.packing_list.items {
-            if matches(item) {
+        for (idx, item) in self.packing_list.items.iter_mut().enumerate() {
+            if item.has_label(&label) {
                 item.selected = !item.selected;
+                // Group actions act on the item (spec 025): clear any
+                // per-occurrence overrides so the new state shows
+                self.occurrence_overrides.retain(|(i, _), _| *i != idx);
             }
         }
 
         // Follow the selection state: added -> collapse, removed -> expand
         let now_selected = !was_selected;
-        self.set_category_collapsed(!now_selected);
-    }
-
-    /// Toggle the packed state of the item under the cursor (right
-    /// panel only).
-    pub(crate) fn toggle_item_packed(&mut self) {
-        // Only toggle packed status when on right side
-        if self.focus_side == FocusSide::Right
-            && let Some(item_index) = self.cursor_item_index()
-        {
-            self.packing_list.items[item_index].packed =
-                !self.packing_list.items[item_index].packed;
-        }
+        self.set_label_collapsed(!now_selected);
     }
 
     /// Toggle the quantity mode (automatic/fixed) in the add or edit
@@ -883,45 +776,31 @@ impl AppDrawState {
 
     // Cycle the category selection in the add/edit dialog (Left/Right);
     // clamped at the list bounds, only when the Category field is focused
-    pub(crate) fn cycle_category_selection(&mut self, direction: i32) {
-        let (field, category_list, category_index, selected_categories) = match &mut self.input_mode
-        {
+    /// Cycle the label picker's highlight (Left/Right in the Labels
+    /// field, spec 025): clamped at the list bounds. The membership
+    /// toggling is Space's job (the multi-select).
+    pub(crate) fn cycle_label_highlight(&mut self, direction: i32) {
+        let (field, label_list, label_index) = match &mut self.input_mode {
             InputMode::AddingItem {
                 field,
-                category_list,
-                category_index,
+                label_list,
+                label_index,
                 ..
-            } => (field, category_list, category_index, None),
-            InputMode::EditingItem {
+            }
+            | InputMode::EditingItem {
                 field,
-                category_list,
-                category_index,
-                selected_categories,
+                label_list,
+                label_index,
                 ..
-            } => (
-                field,
-                category_list,
-                category_index,
-                Some(selected_categories),
-            ),
+            } => (field, label_list, label_index),
             _ => return,
         };
-        if *field != InputField::Category {
+        if *field != InputField::Labels {
             return;
         }
-        let target = (*category_index as i32 + direction)
-            .clamp(0, category_list.len().saturating_sub(1) as i32);
-        *category_index = target as usize;
-        // The highlighted category becomes the selection (spec 014:
-        // Left/Right adjust the value): the item's category follows
-        // the highlight, so the change persists on save. In the edit
-        // dialog the membership set follows too — cycling replaces
-        // the memberships with the highlighted category.
-        if let Some(selected) = selected_categories
-            && let Some(highlighted) = category_list.get(*category_index)
-        {
-            *selected = vec![highlighted.clone()];
-        }
+        let target =
+            (*label_index as i32 + direction).clamp(0, label_list.len().saturating_sub(1) as i32);
+        *label_index = target as usize;
     }
 
     /// Step the Quantity field's value in the add/edit dialog
@@ -986,10 +865,7 @@ impl AppDrawState {
                 let in_scope = match &scope {
                     RecalculateScope::All => true,
                     RecalculateScope::Item(i) => *i == index,
-                    RecalculateScope::Category(c) => item.in_category(c),
-                    RecalculateScope::Group(top) => {
-                        item.categories.iter().any(|c| category_layers(c).0 == *top)
-                    }
+                    RecalculateScope::Label(l) => item.has_label(l),
                 };
                 if item.auto_quantity && in_scope {
                     ItemQuantitySpec::Auto {
@@ -1032,7 +908,8 @@ impl AppDrawState {
         &mut self,
         index: usize,
         name: String,
-        categories: Vec<String>,
+        labels: Vec<String>,
+        singleton: bool,
         quantity: String,
         auto_quantity: Option<bool>,
         rate: String,
@@ -1047,14 +924,15 @@ impl AppDrawState {
         if !name.is_empty() {
             item.name = name;
         }
-        if !categories.is_empty() {
-            // Deduplicate memberships, preserving order
+        if !labels.is_empty() {
+            // Deduplicate labels, preserving order
             let mut seen = std::collections::BTreeSet::new();
-            item.categories = categories
+            item.labels = labels
                 .into_iter()
-                .filter(|c| seen.insert(c.clone()))
+                .filter(|l| seen.insert(l.clone()))
                 .collect();
         }
+        item.singleton = singleton;
         if let Ok(qty) = quantity.parse::<u32>() {
             // Quantities never drop below 1 (spec 003 EC)
             item.quantity = qty.max(1);
@@ -1102,7 +980,8 @@ impl AppDrawState {
     pub(crate) fn add_item_from_dialog(
         &mut self,
         name: String,
-        category: String,
+        labels: Vec<String>,
+        singleton: bool,
         quantity: String,
         auto_quantity: bool,
         rate: String,
@@ -1115,18 +994,26 @@ impl AppDrawState {
         } else {
             name
         };
-        let new_category = if category.is_empty() {
-            // Use first category or default
-            if !self.packing_list.items.is_empty() {
-                self.packing_list.items[0].primary_category().to_string()
+        // At least one label (FR-009): fall back to the first item's
+        // first label, or a default
+        let new_labels = if labels.is_empty() {
+            if let Some(first) = self.packing_list.items.first() {
+                vec![
+                    first
+                        .labels
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Other".to_string()),
+                ]
             } else {
-                "Other".to_string()
+                vec!["Other".to_string()]
             }
         } else {
-            category
+            labels
         };
 
-        let mut item = Item::new(new_name, vec![new_category], qty);
+        let mut item = Item::new(new_name, new_labels, qty);
+        item.singleton = singleton;
         // The dialog's mode decides what the typed quantity means
         // (spec 021): fixed keeps it forever; automatic starts there
         item.auto_quantity = auto_quantity;
