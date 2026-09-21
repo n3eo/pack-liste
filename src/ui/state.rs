@@ -479,8 +479,15 @@ pub(crate) fn sticky_rows(
         PanelRow::Group(_) => None,
     };
     if let Some((pos, row)) = pin_target {
-        visible.insert(0, (pos, row));
-        visible.pop();
+        // The pin displaces the window's last row. When the window
+        // already ends at the list's final row, displacing it would
+        // hide the last item — the item's visibility wins; skip the
+        // pin (the header context is recoverable by scrolling up).
+        let window_ends_at_list_end = scroll + viewport_height >= rows.len();
+        if !window_ends_at_list_end {
+            visible.insert(0, (pos, row));
+            visible.pop();
+        }
     }
     visible
 }

@@ -1019,7 +1019,9 @@ fn hint_collapse_switches_on_the_height_budget() {
 #[test]
 fn sticky_rows_pin_the_orphaned_category_header() {
     use crate::ui::state::sticky_rows;
-    // Rows: [Cat A, a1, a2, Cat B, b1, b2]
+    // Rows: [Cat A, a1, a2, Cat B, b1, b2, Cat C, c1, c2] — long
+    // enough that a mid-list window does not end at the list's end
+    // (the pin is skipped there; the last row stays visible)
     let rows = vec![
         PanelRow::Category("A".to_string()),
         PanelRow::Item(0),
@@ -1027,6 +1029,9 @@ fn sticky_rows_pin_the_orphaned_category_header() {
         PanelRow::Category("B".to_string()),
         PanelRow::Item(2),
         PanelRow::Item(3),
+        PanelRow::Category("C".to_string()),
+        PanelRow::Item(4),
+        PanelRow::Item(5),
     ];
     // Scroll 0: the plain window, unchanged
     let visible = sticky_rows(&rows, 0, 3);
@@ -1278,9 +1283,12 @@ fn sticky_rows_pin_the_group_when_it_scrolls_off() {
         PanelRow::Item(1),
         PanelRow::Category("Ausland: Handgepäck".to_string()),
         PanelRow::Item(2),
+        PanelRow::Group("Technik".to_string()),
+        PanelRow::Item(3),
     ];
     // Scroll 4 (starts on the Handgepäck header): the group is
-    // off-screen above → pinned
+    // off-screen above → pinned (the window ends mid-list, so the
+    // pin displaces its last row without hiding the list's end)
     let visible = sticky_rows(&rows, 4, 2);
     assert!(matches!(&visible[0].1, PanelRow::Group(g) if g == "Ausland"));
     assert!(matches!(&visible[1].1, PanelRow::Category(c) if c == "Ausland: Handgepäck"));
@@ -1333,4 +1341,31 @@ fn right_cursor_walks_the_tree_including_headers() {
     // Up at the top stays at the top
     state.move_cursor_up();
     assert_eq!(state.selected_index, 0);
+}
+
+#[test]
+fn sticky_rows_never_hide_the_last_row_at_the_list_end() {
+    use crate::ui::state::sticky_rows;
+    // Regression: at max scroll the window ends at the list's final
+    // row — the pin must NOT displace it (the last item stays
+    // visible; the header context yields).
+    let rows = vec![
+        PanelRow::Group("Ausland".to_string()),
+        PanelRow::Category("Ausland: Karten".to_string()),
+        PanelRow::Item(0),
+        PanelRow::Item(1),
+        PanelRow::Item(2),
+    ];
+    // Max scroll with viewport 3: window = rows 2..5 (ends at the
+    // list's end). The pin would displace row 5 — skipped.
+    let visible = sticky_rows(&rows, 2, 3);
+    assert_eq!(visible.len(), 3);
+    // The last row (the final item) is present
+    assert!(matches!(visible[2].1, PanelRow::Item(2)));
+    assert_eq!(visible[2].0, 4);
+    // Mid-list (window ends before the list's end): the pin works —
+    // a window starting on the Category row pins its Group header
+    let visible = sticky_rows(&rows, 1, 3);
+    assert!(matches!(&visible[0].1, PanelRow::Group(g) if g == "Ausland"));
+    assert!(matches!(visible[1].1, PanelRow::Category(_)));
 }
