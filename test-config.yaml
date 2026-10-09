@@ -1098,6 +1098,11 @@ items:
   - Bahn
   singleton: true
   auto_quantity: true
+- name: T-Shirt
+  labels:
+  - Unternehmungen
+  - Ausland
+  auto_quantity: true
 weekdays: 6
 travel_style: backpacker
 weather: mixed
